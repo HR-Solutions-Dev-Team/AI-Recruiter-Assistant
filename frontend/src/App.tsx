@@ -1,42 +1,19 @@
-import { useEffect, useState } from "react";
-
-type HealthStatus = {
-  status: string;
-};
+import { CSSProperties } from "react";
+import HomePage from "./pages/HomePage";
+import { colors } from "./theme/colors";
 
 export default function App() {
-  const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const response = await fetch("/api/health");
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const data: HealthStatus = await response.json();
-        setHealth(data);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      }
-    };
-
-    load();
-  }, []);
+  const themeStyle = {
+    "--color-white": colors.white,
+    "--color-black": colors.black,
+    "--color-purple": colors.purple,
+    "--color-blue": colors.blue,
+    "--radius-base": "12px",
+  } as CSSProperties;
 
   return (
-    <main className="page">
-      <header className="hero">
-        <h1>AI Recruiter Assistant</h1>
-        <p>Сервис автоматизации создания вакансий и сопоставления с резюме.</p>
-      </header>
-
-      <section className="card">
-        <h2>Состояние API</h2>
-        {error && <p className="error">Ошибка: {error}</p>}
-        {health ? <p className="ok">Статус: {health.status}</p> : <p>Загрузка...</p>}
-      </section>
-    </main>
+    <div className="app-root" style={themeStyle}>
+      <HomePage />
+    </div>
   );
 }

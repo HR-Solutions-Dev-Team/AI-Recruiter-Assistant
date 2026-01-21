@@ -1,0 +1,17 @@
+services:
+  ara-backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    image: ara-backend
+    container_name: ara-docker
+    ports:
+      - "443:443"
+  ara-frontend:
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+    image: ara-frontend
+    container_name: ara-frontend
+    ports:
+      - "5173:80"

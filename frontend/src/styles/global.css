@@ -1,0 +1,34 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", "Segoe UI", sans-serif;
+  background: var(--color-white);
+  color: var(--color-black);
+}
+
+button {
+  font: inherit;
+}
+
+.app-root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 9% 16% 75%;
+}
+
+.secondary-panel {
+  background: var(--color-white);
+}
+
+.main-content {
+  background: var(--color-white);
+}
