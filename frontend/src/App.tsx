@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import MainLayout from './layouts/MainLayout';
 import Home from './pages/Home';
 import Vacancy from './pages/Vacancy';
+import VacancyCreate from './pages/VacancyCreate';
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
           <Route index element={<Navigate to="/home" replace />} />
           <Route path="home" element={<Home />} />
           <Route path="vacancy" element={<Vacancy />} />
+          <Route path="vacancy/create" element={<VacancyCreate />} />
         </Route>
       </Routes>
     </BrowserRouter>
