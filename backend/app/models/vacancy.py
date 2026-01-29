@@ -197,11 +197,22 @@ class Industry(BaseModel):
         populate_by_name = True
 
 
-class CompanyBenefit(BaseModel):
-    """Бенефит компании"""
+class ActivitySphereItem(BaseModel):
+    """Элемент иерархии сферы деятельности"""
 
     id: Optional[str] = None
     name: Optional[str] = None
+
+
+class ActivitySphere(BaseModel):
+    """Сфера деятельности компании (иерархическая структура)"""
+
+    sphere: Optional[ActivitySphereItem] = Field(None, description="Основная сфера деятельности")
+    sub_sphere: Optional[ActivitySphereItem] = Field(None, alias="subSphere", description="Подсфера деятельности")
+    specialization: Optional[ActivitySphereItem] = Field(None, description="Специализация")
+
+    class Config:
+        populate_by_name = True
 
 
 class CompanyLink(BaseModel):
@@ -375,7 +386,7 @@ class VacancyCompany(BaseModel):
     size: Optional[CompanySize] = None
     industry_id: Optional[str] = Field(None, alias="industryId")
     okved: Optional[str] = None
-    benefits: Optional[list[CompanyBenefit]] = None
+    activity_sphere: Optional[ActivitySphere] = Field(None, alias="activitySphere")
     public_links: Optional[list[CompanyLink]] = Field(None, alias="publicLinks")
 
     class Config:

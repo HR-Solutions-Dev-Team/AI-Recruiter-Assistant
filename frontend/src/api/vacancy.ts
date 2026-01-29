@@ -30,6 +30,48 @@ export interface SessionResponse {
   missing_fields: string[] | null;
 }
 
+export interface EnrichmentOption {
+  value: string;
+  description: string | null;
+}
+
+export interface EnrichmentQuestion {
+  field_path: string;
+  question_text: string;
+  options: EnrichmentOption[];
+  allow_custom: boolean;
+  has_more_questions: boolean;
+}
+
+export interface NextQuestionResponse {
+  questions: EnrichmentQuestion[];
+  is_complete: boolean;
+  completion_percent: number;
+}
+
+export interface SubmitAnswerResponse {
+  success: boolean;
+  completion_percent: number;
+  updated_field: string | null;
+  // Буфер: до 3 независимых вопросов за раз
+  next_questions: EnrichmentQuestion[];
+  is_complete: boolean;
+}
+
+export interface BatchAnswerItem {
+  field_path: string;
+  answer: string;
+  skip: boolean;
+}
+
+export interface BatchAnswerResponse {
+  success: boolean;
+  completion_percent: number;
+  processed_count: number;
+  next_questions: EnrichmentQuestion[];
+  is_complete: boolean;
+}
+
 /**
  * Создать новую сессию для создания вакансии.
  */
@@ -83,4 +125,43 @@ export async function uploadFile(
  */
 export async function deleteSession(sessionId: string): Promise<void> {
   await apiClient.delete(`/v1/vacancy/session/${sessionId}`);
+}
+
+/**
+ * Получить следующий вопрос для обогащения вакансии.
+ */
+export async function getNextQuestion(sessionId: string): Promise<NextQuestionResponse> {
+  return apiClient.post<NextQuestionResponse>(
+    `/v1/vacancy/session/${sessionId}/enrichment/next-question`,
+    {}
+  );
+}
+
+/**
+ * Отправить ответ на вопрос обогащения.
+ */
+export async function submitAnswer(
+  sessionId: string,
+  fieldPath: string,
+  answer: string,
+  skip: boolean = false
+): Promise<SubmitAnswerResponse> {
+  return apiClient.post<SubmitAnswerResponse>(
+    `/v1/vacancy/session/${sessionId}/enrichment/answer`,
+    { field_path: fieldPath, answer, skip }
+  );
+}
+
+/**
+ * Отправить пачку ответов за один запрос.
+ * Используется когда буфер вопросов опустеет.
+ */
+export async function batchSubmitAnswers(
+  sessionId: string,
+  answers: BatchAnswerItem[]
+): Promise<BatchAnswerResponse> {
+  return apiClient.post<BatchAnswerResponse>(
+    `/v1/vacancy/session/${sessionId}/enrichment/batch-answer`,
+    { answers }
+  );
 }

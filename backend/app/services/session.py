@@ -151,10 +151,24 @@ class VacancySession(BaseModel):
             filled += 0.5
         if company.get("size"):
             filled += 0.5
-        if company.get("benefits"):
-            filled += 1
+        filled += self._check_activity_sphere(company.get("activitySphere"))
 
         return min(filled / 3, 1.0)
+
+    def _check_activity_sphere(self, activity_sphere: dict | None) -> float:
+        """Проверяет заполненность сферы деятельности."""
+        if not activity_sphere:
+            return 0
+
+        score = 0.0
+        if activity_sphere.get("sphere"):
+            score += 0.4
+        if activity_sphere.get("subSphere"):
+            score += 0.3
+        if activity_sphere.get("specialization"):
+            score += 0.3
+
+        return score
 
     def _check_org_structure(self) -> float:
         """Проверяет заполненность оргструктуры."""

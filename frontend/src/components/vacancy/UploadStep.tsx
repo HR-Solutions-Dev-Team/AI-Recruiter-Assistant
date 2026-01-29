@@ -1,5 +1,5 @@
 import { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { Upload, Type, AlertCircle, File, X, Info, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Upload, Type, AlertCircle, File, X, Info, ArrowRight } from 'lucide-react';
 import { createSession, uploadText, uploadFile, type ParseResponse } from '../../api';
 import type { VacancyInput } from '../../types/vacancy';
 import AnalyzingAnimation from './AnalyzingAnimation';
@@ -28,7 +28,6 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validateFile = (file: File): string | null => {
@@ -55,7 +54,6 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
     e.preventDefault();
     setIsDragging(false);
     setError(null);
-    setParseResult(null);
 
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
@@ -70,7 +68,6 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     setError(null);
-    setParseResult(null);
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       const validationError = validateFile(selectedFile);
@@ -85,7 +82,6 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
   const handleRemoveFile = () => {
     setFile(null);
     setError(null);
-    setParseResult(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -115,21 +111,15 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
         result = await uploadText(session.session_id, text);
       }
 
-      setParseResult(result);
-
       // Сохраняем parsed_data напрямую как VacancyInput
       setVacancyData(result.parsed_data);
 
+      // Сразу переходим к следующему шагу (ChatStep)
+      onNext(result.session_id, result.parsed_data, result.completion_percent);
+
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Произошла ошибка при обработке');
-    } finally {
       setIsLoading(false);
-    }
-  };
-
-  const handleNext = () => {
-    if (parseResult) {
-      onNext(parseResult.session_id, parseResult.parsed_data, parseResult.completion_percent);
     }
   };
 
@@ -164,7 +154,6 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           onClick={() => {
             setMode('file');
             setError(null);
-            setParseResult(null);
           }}
           disabled={isLoading}
           className={`
@@ -183,7 +172,6 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           onClick={() => {
             setMode('text');
             setError(null);
-            setParseResult(null);
           }}
           disabled={isLoading}
           className={`
@@ -283,10 +271,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           <div className="relative">
             <textarea
               value={text}
-              onChange={(e) => {
-                setText(e.target.value);
-                setParseResult(null);
-              }}
+              onChange={(e) => setText(e.target.value)}
               disabled={isLoading}
               placeholder="Вставьте или введите описание вакансии...
 
@@ -314,80 +299,23 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
         </div>
       )}
 
-      {/* Parse Result */}
-      {parseResult && (
-        <div className="mt-4 p-4 bg-green-50 border border-green-100 rounded-xl">
-          <div className="flex items-center gap-2 text-green-800 font-medium">
-            <CheckCircle2 size={20} strokeWidth={2} />
-            Анализ завершён
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs text-green-600">Заполненность</p>
-              <div className="mt-1 flex items-center gap-2">
-                <div className="flex-1 h-2 bg-green-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-green-600 rounded-full"
-                    style={{ width: `${parseResult.completion_percent}%` }}
-                  />
-                </div>
-                <span className="text-sm font-semibold text-green-800">
-                  {parseResult.completion_percent}%
-                </span>
-              </div>
-            </div>
-            <div>
-              <p className="text-xs text-green-600">Уверенность ИИ</p>
-              <p className="text-sm font-semibold text-green-800 mt-1">
-                {Math.round(parseResult.confidence * 100)}%
-              </p>
-            </div>
-          </div>
-          {parseResult.warnings && parseResult.warnings.length > 0 && (
-            <div className="mt-3 p-2 bg-amber-50 rounded-lg">
-              <p className="text-xs text-amber-700">
-                {parseResult.warnings.join('. ')}
-              </p>
-            </div>
-          )}
-          {parseResult.missing_fields && parseResult.missing_fields.length > 0 && (
-            <div className="mt-2">
-              <p className="text-xs text-green-600">
-                Не удалось извлечь: {parseResult.missing_fields.join(', ')}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Action Buttons */}
       <div className="mt-8 flex justify-end gap-3">
-        {!parseResult ? (
-          <button
-            onClick={handleSubmit}
-            disabled={!canProceed}
-            className={`
-              flex items-center gap-2 px-6 py-3 rounded-xl font-medium text-sm
-              sidebar-transition
-              ${canProceed
-                ? 'bg-gray-900 text-white hover:bg-gray-800'
-                : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-              }
-            `}
-          >
-            Анализировать
-            <ArrowRight size={18} strokeWidth={2} />
-          </button>
-        ) : (
-          <button
-            onClick={handleNext}
-            className="flex items-center gap-2 px-6 py-3 rounded-xl font-medium text-sm
-                       bg-gray-900 text-white hover:bg-gray-800 sidebar-transition"
-          >
-            Продолжить
-            <ArrowRight size={18} strokeWidth={2} />
-          </button>
-        )}
+        <button
+          onClick={handleSubmit}
+          disabled={!canProceed}
+          className={`
+            flex items-center gap-2 px-6 py-3 rounded-xl font-medium text-sm
+            sidebar-transition
+            ${canProceed
+              ? 'bg-gray-900 text-white hover:bg-gray-800'
+              : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+            }
+          `}
+        >
+          Анализировать
+          <ArrowRight size={18} strokeWidth={2} />
+        </button>
       </div>
     </div>
   );

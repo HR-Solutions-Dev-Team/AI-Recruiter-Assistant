@@ -1,0 +1,584 @@
+"""
+Сервис для обогащения вакансий через LLM.
+Генерирует контекстные вопросы по незаполненным полям.
+"""
+
+import json
+import logging
+from typing import Any
+
+import httpx
+from pydantic import BaseModel
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class EnrichmentOption(BaseModel):
+    """Вариант ответа на вопрос."""
+
+    value: str
+    description: str | None = None
+
+
+class EnrichmentQuestion(BaseModel):
+    """Вопрос для обогащения вакансии."""
+
+    field_path: str
+    question_text: str
+    options: list[EnrichmentOption]
+    allow_custom: bool = True
+    depends_on: str | None = None
+
+
+# Группы зависимых полей (нельзя спрашивать вместе)
+DEPENDENCY_GROUPS = [
+    # Сфера деятельности - иерархия
+    {"company.activitySphere.sphere", "company.activitySphere.subSphere"},
+    # Industry - иерархия
+    {"core.industry"},
+]
+
+
+def _get_dependency_group(field_path: str) -> set[str] | None:
+    """Возвращает группу зависимостей для поля."""
+    for group in DEPENDENCY_GROUPS:
+        if field_path in group:
+            return group
+    return None
+
+
+def _are_fields_independent(field1: str, field2: str) -> bool:
+    """Проверяет, что два поля независимы (можно спрашивать вместе)."""
+    group1 = _get_dependency_group(field1)
+    group2 = _get_dependency_group(field2)
+
+    # Если оба поля в одной группе зависимостей - они зависимы
+    if group1 and group2 and group1 == group2:
+        return False
+
+    # Проверяем прямую зависимость через depends_on
+    for field_info in FIELD_PRIORITIES:
+        if field_info["path"] == field1 and field_info.get("depends_on") == field2:
+            return False
+        if field_info["path"] == field2 and field_info.get("depends_on") == field1:
+            return False
+
+    return True
+
+
+class EnrichmentAnswerResult(BaseModel):
+    """Результат обработки ответа."""
+
+    field_path: str
+    updated_value: Any
+    new_completion_percent: int
+
+
+def _safe_get(d: dict, *keys: str) -> Any:
+    """Безопасно получает вложенное значение из словаря."""
+    result = d
+    for key in keys:
+        if result is None or not isinstance(result, dict):
+            return None
+        result = result.get(key)
+    return result
+
+
+# Приоритеты полей для обогащения
+FIELD_PRIORITIES: list[dict[str, Any]] = [
+    # Critical - обязательно спрашивать
+    {
+        "path": "core.careerLevel.code",
+        "priority": 1,
+        "description": "Уровень позиции в карьерной иерархии",
+        "check": lambda d: bool(_safe_get(d, "core", "careerLevel", "code")),
+    },
+    {
+        "path": "requirements.skills",
+        "priority": 1,
+        "description": "Ключевые навыки и компетенции (минимум 3-5)",
+        "check": lambda d: len(_safe_get(d, "requirements", "skills") or []) >= 3,
+    },
+    # Important - высокий приоритет
+    {
+        "path": "company.activitySphere.sphere",
+        "priority": 2,
+        "description": "Основная сфера деятельности компании",
+        "check": lambda d: bool(_safe_get(d, "company", "activitySphere", "sphere")),
+        "depends_on": None,
+    },
+    {
+        "path": "company.activitySphere.subSphere",
+        "priority": 2,
+        "description": "Подсфера деятельности компании",
+        "check": lambda d: bool(_safe_get(d, "company", "activitySphere", "subSphere")),
+        "depends_on": "company.activitySphere.sphere",
+    },
+    {
+        "path": "core.industry",
+        "priority": 2,
+        "description": "Отрасль вакансии",
+        "check": lambda d: bool(_safe_get(d, "core", "industry", "name")),
+    },
+    {
+        "path": "workConditions.salary",
+        "priority": 2,
+        "description": "Зарплатная вилка",
+        "check": lambda d: bool(_safe_get(d, "workConditions", "salary")),
+    },
+    {
+        "path": "workConditions.location",
+        "priority": 2,
+        "description": "Локация и формат работы",
+        "check": lambda d: bool(_safe_get(d, "workConditions", "location")),
+    },
+    {
+        "path": "requirements.experience",
+        "priority": 2,
+        "description": "Требования к опыту работы",
+        "check": lambda d: bool(_safe_get(d, "requirements", "experience")),
+    },
+    {
+        "path": "responsibilities.zones",
+        "priority": 2,
+        "description": "Зоны ответственности",
+        "check": lambda d: len(_safe_get(d, "responsibilities", "zones") or []) >= 2,
+    },
+    # Recommended - если есть время
+    {
+        "path": "core.synonyms",
+        "priority": 3,
+        "description": "Альтернативные названия позиции",
+        "check": lambda d: bool(_safe_get(d, "core", "synonyms")),
+    },
+    {
+        "path": "classification.businessFunction",
+        "priority": 3,
+        "description": "Бизнес-функция (IT, Finance, HR и т.д.)",
+        "check": lambda d: bool(_safe_get(d, "classification", "businessFunction")),
+    },
+    {
+        "path": "classification.roleFamily",
+        "priority": 3,
+        "description": "Семейство ролей (Engineering, Management и т.д.)",
+        "check": lambda d: bool(_safe_get(d, "classification", "roleFamily")),
+    },
+    {
+        "path": "requirements.languages",
+        "priority": 3,
+        "description": "Требования к языкам",
+        "check": lambda d: bool(_safe_get(d, "requirements", "languages")),
+    },
+    {
+        "path": "orgStructure.reportsTo",
+        "priority": 3,
+        "description": "Кому подчиняется позиция",
+        "check": lambda d: bool(_safe_get(d, "orgStructure", "reportsTo")),
+    },
+    {
+        "path": "orgStructure.teamRoles",
+        "priority": 3,
+        "description": "Роли в команде",
+        "check": lambda d: bool(_safe_get(d, "orgStructure", "teamRoles")),
+    },
+]
+
+
+QUESTION_GENERATION_PROMPT = """Ты помогаешь обогатить вакансию для поиска УЗКОСПЕЦИАЛИЗИРОВАННЫХ специалистов.
+
+Текущие данные вакансии:
+{vacancy_data}
+
+Незаполненное поле: {field_path}
+Описание поля: {field_description}
+
+Сгенерируй вопрос и 3-4 релевантных варианта ответа.
+Варианты должны быть:
+1. Конкретными, не общими
+2. Релевантными контексту вакансии (учитывай jobTitle, industry, skills если есть)
+3. На русском языке
+
+Формат ответа - ТОЛЬКО валидный JSON без markdown:
+{{
+  "question": "текст вопроса",
+  "options": [
+    {{"value": "значение", "description": "краткое пояснение"}}
+  ]
+}}"""
+
+
+ANSWER_PROCESSING_PROMPT = """Преобразуй ответ пользователя в структурированные данные для поля вакансии.
+
+Поле: {field_path}
+Ответ пользователя: {answer}
+Текущие данные вакансии: {vacancy_data}
+
+Верни ТОЛЬКО валидный JSON с обновлённым значением для этого поля.
+Формат зависит от поля:
+- Для простых полей (string): {{"value": "строка"}}
+- Для объектов (industry, careerLevel): {{"value": {{"name": "...", "code": "..." если нужно}}}}
+- Для массивов (skills, zones): {{"value": [{{"name": "...", ...}}]}}
+
+Пример для core.careerLevel.code:
+{{"value": "senior"}}
+
+Пример для company.activitySphere.sphere:
+{{"value": {{"name": "Информационные технологии"}}}}
+
+Пример для responsibilities.zones:
+{{"value": ["Разработка архитектуры", "Код-ревью", "Менторинг"]}}
+
+JSON:"""
+
+
+class EnrichmentService:
+    """Сервис для обогащения вакансий через LLM."""
+
+    def __init__(self) -> None:
+        self.api_key = settings.openrouter_api_key
+        self.model = settings.openrouter_model
+        self.base_url = settings.openrouter_base_url
+
+    async def get_next_question(
+        self,
+        vacancy_data: dict[str, Any],
+        asked_fields: list[str] | None = None,
+    ) -> EnrichmentQuestion | None:
+        """
+        Определяет следующее незаполненное поле и генерирует вопрос.
+
+        Args:
+            vacancy_data: Текущие данные вакансии
+            asked_fields: Поля, по которым уже задавали вопросы (включая пропущенные)
+
+        Returns:
+            EnrichmentQuestion или None если все поля заполнены
+        """
+        asked_fields = asked_fields or []
+
+        # Находим первое незаполненное поле по приоритету
+        for field_info in FIELD_PRIORITIES:
+            field_path = field_info["path"]
+
+            # Пропускаем уже спрошенные поля
+            if field_path in asked_fields:
+                continue
+
+            # Проверяем заполненность
+            if field_info["check"](vacancy_data):
+                continue
+
+            # Проверяем зависимости
+            depends_on = field_info.get("depends_on")
+            if depends_on:
+                # Находим зависимое поле и проверяем его заполненность
+                dep_field = next(
+                    (f for f in FIELD_PRIORITIES if f["path"] == depends_on), None
+                )
+                if dep_field and not dep_field["check"](vacancy_data):
+                    continue
+
+            # Генерируем вопрос через LLM
+            try:
+                question = await self._generate_question(
+                    vacancy_data=vacancy_data,
+                    field_path=field_path,
+                    field_description=field_info["description"],
+                )
+                if question:
+                    question.depends_on = depends_on
+                    return question
+            except Exception as e:
+                logger.error(f"Failed to generate question for {field_path}: {e}")
+                continue
+
+        return None
+
+    async def get_next_questions(
+        self,
+        vacancy_data: dict[str, Any],
+        asked_fields: list[str] | None = None,
+        max_questions: int = 3,
+    ) -> list[EnrichmentQuestion]:
+        """
+        Генерирует до max_questions независимых вопросов за один вызов.
+
+        Вопросы выбираются так, чтобы они не были зависимы друг от друга
+        (например, нельзя спрашивать sphere и subSphere одновременно).
+
+        Args:
+            vacancy_data: Текущие данные вакансии
+            asked_fields: Поля, по которым уже задавали вопросы
+            max_questions: Максимальное количество вопросов (до 3)
+
+        Returns:
+            Список независимых вопросов (может быть пустым)
+        """
+        asked_fields = asked_fields or []
+        questions: list[EnrichmentQuestion] = []
+        selected_fields: list[str] = []
+
+        # Собираем кандидатов на вопросы
+        candidates: list[dict[str, Any]] = []
+
+        for field_info in FIELD_PRIORITIES:
+            field_path = field_info["path"]
+
+            # Пропускаем уже спрошенные поля
+            if field_path in asked_fields:
+                continue
+
+            # Проверяем заполненность
+            if field_info["check"](vacancy_data):
+                continue
+
+            # Проверяем зависимости от других полей
+            depends_on = field_info.get("depends_on")
+            if depends_on:
+                dep_field = next(
+                    (f for f in FIELD_PRIORITIES if f["path"] == depends_on), None
+                )
+                if dep_field and not dep_field["check"](vacancy_data):
+                    continue
+
+            candidates.append(field_info)
+
+        # Выбираем независимые поля
+        for candidate in candidates:
+            if len(selected_fields) >= max_questions:
+                break
+
+            field_path = candidate["path"]
+
+            # Проверяем независимость от уже выбранных полей
+            is_independent = all(
+                _are_fields_independent(field_path, selected)
+                for selected in selected_fields
+            )
+
+            if is_independent:
+                selected_fields.append(field_path)
+
+        # Генерируем вопросы параллельно через asyncio
+        import asyncio
+
+        async def generate_for_field(field_path: str) -> EnrichmentQuestion | None:
+            field_info = next(
+                (f for f in FIELD_PRIORITIES if f["path"] == field_path), None
+            )
+            if not field_info:
+                return None
+            try:
+                question = await self._generate_question(
+                    vacancy_data=vacancy_data,
+                    field_path=field_path,
+                    field_description=field_info["description"],
+                )
+                if question:
+                    question.depends_on = field_info.get("depends_on")
+                return question
+            except Exception as e:
+                logger.error(f"Failed to generate question for {field_path}: {e}")
+                return None
+
+        # Запускаем генерацию параллельно
+        results = await asyncio.gather(
+            *[generate_for_field(fp) for fp in selected_fields],
+            return_exceptions=True,
+        )
+
+        # Собираем успешные результаты
+        for result in results:
+            if isinstance(result, EnrichmentQuestion):
+                questions.append(result)
+
+        return questions
+
+    async def process_answer(
+        self,
+        vacancy_data: dict[str, Any],
+        field_path: str,
+        answer: str,
+    ) -> dict[str, Any]:
+        """
+        Обрабатывает ответ пользователя и обновляет данные вакансии.
+
+        Args:
+            vacancy_data: Текущие данные вакансии
+            field_path: Путь к полю
+            answer: Ответ пользователя
+
+        Returns:
+            Обновлённые данные вакансии
+        """
+        try:
+            processed_value = await self._process_answer_with_llm(
+                vacancy_data=vacancy_data,
+                field_path=field_path,
+                answer=answer,
+            )
+
+            # Обновляем данные вакансии
+            updated_data = self._update_vacancy_data(
+                vacancy_data=vacancy_data,
+                field_path=field_path,
+                value=processed_value,
+            )
+
+            return updated_data
+
+        except Exception as e:
+            logger.error(f"Failed to process answer for {field_path}: {e}")
+            # В случае ошибки пробуем простое присвоение
+            return self._update_vacancy_data(
+                vacancy_data=vacancy_data,
+                field_path=field_path,
+                value=answer,
+            )
+
+    async def _generate_question(
+        self,
+        vacancy_data: dict[str, Any],
+        field_path: str,
+        field_description: str,
+    ) -> EnrichmentQuestion | None:
+        """Генерирует вопрос через LLM."""
+        prompt = QUESTION_GENERATION_PROMPT.format(
+            vacancy_data=json.dumps(vacancy_data, ensure_ascii=False, indent=2),
+            field_path=field_path,
+            field_description=field_description,
+        )
+
+        response = await self._call_llm(prompt)
+        if not response:
+            return None
+
+        try:
+            data = json.loads(response)
+            options = [
+                EnrichmentOption(
+                    value=opt.get("value", ""),
+                    description=opt.get("description"),
+                )
+                for opt in data.get("options", [])
+            ]
+
+            return EnrichmentQuestion(
+                field_path=field_path,
+                question_text=data.get("question", f"Укажите значение для {field_path}"),
+                options=options,
+                allow_custom=True,
+            )
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response: {e}")
+            return None
+
+    async def _process_answer_with_llm(
+        self,
+        vacancy_data: dict[str, Any],
+        field_path: str,
+        answer: str,
+    ) -> Any:
+        """Преобразует ответ пользователя в структурированные данные."""
+        prompt = ANSWER_PROCESSING_PROMPT.format(
+            field_path=field_path,
+            answer=answer,
+            vacancy_data=json.dumps(vacancy_data, ensure_ascii=False, indent=2),
+        )
+
+        response = await self._call_llm(prompt)
+        if not response:
+            return answer
+
+        try:
+            data = json.loads(response)
+            return data.get("value", answer)
+        except json.JSONDecodeError:
+            return answer
+
+    async def _call_llm(self, prompt: str) -> str | None:
+        """Вызывает OpenRouter API."""
+        if not self.api_key:
+            logger.error("OPENROUTER_API_KEY not configured")
+            return None
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "https://ai-recruiter-assistant.local",
+                        "X-Title": "AI Recruiter Assistant",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.3,
+                        "max_tokens": 1000,
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                if not data.get("choices"):
+                    return None
+
+                content = data["choices"][0].get("message", {}).get("content")
+                return self._clean_json_response(content) if content else None
+
+        except Exception as e:
+            logger.error(f"LLM call failed: {e}")
+            return None
+
+    def _clean_json_response(self, content: str) -> str:
+        """Очищает ответ LLM от markdown обёртки."""
+        content = content.strip()
+        if content.startswith("```"):
+            lines = content.split("\n")
+            if lines[-1].strip() == "```":
+                content = "\n".join(lines[1:-1])
+            else:
+                content = "\n".join(lines[1:])
+        return content
+
+    def _update_vacancy_data(
+        self,
+        vacancy_data: dict[str, Any],
+        field_path: str,
+        value: Any,
+    ) -> dict[str, Any]:
+        """Обновляет данные вакансии по пути к полю."""
+        import copy
+
+        updated = copy.deepcopy(vacancy_data)
+        parts = field_path.split(".")
+
+        # Навигация до родительского объекта
+        current = updated
+        for part in parts[:-1]:
+            if part not in current or current[part] is None:
+                current[part] = {}
+            current = current[part]
+
+        # Устанавливаем значение
+        final_key = parts[-1]
+
+        # Специальная обработка для некоторых полей
+        if field_path == "core.careerLevel.code" and isinstance(value, str):
+            current[final_key] = value
+        elif field_path.endswith(".sphere") or field_path.endswith(".subSphere"):
+            if isinstance(value, str):
+                current[final_key] = {"name": value}
+            else:
+                current[final_key] = value
+        else:
+            current[final_key] = value
+
+        return updated
+
+
+enrichment_service = EnrichmentService()

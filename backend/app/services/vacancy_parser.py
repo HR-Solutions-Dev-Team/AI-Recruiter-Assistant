@@ -39,7 +39,11 @@ SYSTEM_PROMPT = """Ты — эксперт по HR и рекрутингу. Тв
     "name": "string — название компании",
     "type": "startup|sme|enterprise|corporation|government|ngo|consulting",
     "size": "1-10|11-50|51-200|201-500|501-1000|1001-5000|5000+",
-    "benefits": [{"name": "string"}],
+    "activitySphere": {
+      "sphere": {"name": "string — основная сфера деятельности (IT, Финансы, Производство и т.д.)"},
+      "subSphere": {"name": "string — подсфера (разработка ПО, банкинг, машиностроение)"},
+      "specialization": {"name": "string — специализация (веб-разработка, розничный банкинг)"}
+    },
     "publicLinks": [{"type": "site|hh|linkedin|habr|glassdoor|github|other", "url": "string"}]
   },
   "classification": {

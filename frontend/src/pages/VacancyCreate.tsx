@@ -101,12 +101,14 @@ export default function VacancyCreate() {
             setVacancyData={setVacancyData}
           />
         )}
-        {currentStep === 2 && (
+        {currentStep === 2 && sessionId && (
           <ChatStep
+            sessionId={sessionId}
             onNext={handleNextStep}
             vacancyData={vacancyData}
             setVacancyData={setVacancyData}
             completionPercent={completionPercent}
+            setCompletionPercent={setCompletionPercent}
           />
         )}
         {currentStep === 3 && (
