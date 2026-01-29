@@ -29,8 +29,25 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=true
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - app-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 networks:
   app-network:

@@ -205,16 +205,44 @@ class VacancyParserService:
             )
             response.raise_for_status()
             data = response.json()
-            return data["choices"][0]["message"]["content"]
+            logger.debug(f"OpenRouter response: {data}")
+
+            # Проверяем структуру ответа
+            if not data.get("choices"):
+                logger.error(f"No choices in response: {data}")
+                raise ValueError(f"Invalid API response: {data}")
+
+            content = data["choices"][0].get("message", {}).get("content")
+            if not content:
+                logger.error(f"No content in response: {data}")
+                raise ValueError("Empty response from LLM")
+
+            return content
 
     def _parse_llm_response(self, raw: str) -> dict[str, Any]:
         """Парсит JSON из ответа LLM."""
+        if not raw:
+            raise ValueError("Empty LLM response")
+
         content = raw.strip()
+
+        # Убираем markdown обёртку если есть
         if content.startswith("```"):
             lines = content.split("\n")
-            content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+            # Убираем первую строку (```json) и последнюю (```)
+            if lines[-1].strip() == "```":
+                content = "\n".join(lines[1:-1])
+            else:
+                content = "\n".join(lines[1:])
 
-        return json.loads(content)
+        try:
+            result = json.loads(content)
+            if result is None:
+                raise ValueError("Parsed result is None")
+            return result
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON: {e}\nContent: {content[:500]}")
+            raise ValueError(f"Invalid JSON from LLM: {e}")
 
     def _build_response(
         self,

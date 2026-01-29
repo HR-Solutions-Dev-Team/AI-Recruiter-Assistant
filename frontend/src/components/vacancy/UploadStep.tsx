@@ -1,11 +1,14 @@
 import { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { Upload, FileText, Type, AlertCircle, File, X, Info, ArrowRight } from 'lucide-react';
+import { Upload, Type, AlertCircle, File, X, Info, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { createSession, uploadText, uploadFile, type ParseResponse } from '../../api';
 import type { VacancyData } from '../../pages/VacancyCreate';
+import type { VacancyInput } from '../../types/vacancy';
+import AnalyzingAnimation from './AnalyzingAnimation';
 
 type InputMode = 'file' | 'text';
 
 interface UploadStepProps {
-  onNext: () => void;
+  onNext: (sessionId: string, parsedData: VacancyInput, completionPercent: number) => void;
   setVacancyData: React.Dispatch<React.SetStateAction<VacancyData>>;
 }
 
@@ -17,7 +20,7 @@ const ALLOWED_TYPES = [
 ];
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt'];
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) {
   const [mode, setMode] = useState<InputMode>('file');
@@ -25,14 +28,16 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validateFile = (file: File): string | null => {
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(pdf|docx?|txt)$/i)) {
       return 'Неподдерживаемый формат файла. Используйте PDF, Word или TXT.';
     }
     if (file.size > MAX_FILE_SIZE) {
-      return 'Файл слишком большой. Максимальный размер — 2 МБ.';
+      return 'Файл слишком большой. Максимальный размер — 10 МБ.';
     }
     return null;
   };
@@ -51,6 +56,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
     e.preventDefault();
     setIsDragging(false);
     setError(null);
+    setParseResult(null);
 
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile) {
@@ -65,6 +71,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
     setError(null);
+    setParseResult(null);
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       const validationError = validateFile(selectedFile);
@@ -79,6 +86,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
   const handleRemoveFile = () => {
     setFile(null);
     setError(null);
+    setParseResult(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -90,47 +98,75 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
-  const getFileIcon = (fileName: string) => {
-    const ext = fileName.split('.').pop()?.toLowerCase();
-    return <File size={20} strokeWidth={2} className="text-gray-500" />;
+  const canProceed = mode === 'file' ? file !== null : text.trim().length > 0;
+
+  const convertParsedDataToVacancyData = (parsed: VacancyInput): VacancyData => {
+    return {
+      title: parsed.core?.jobTitle || '',
+      department: parsed.classification?.businessFunction?.name || '',
+      location: parsed.workConditions?.location?.city || '',
+      employmentType: parsed.workConditions?.employmentType?.name || '',
+      experienceLevel: parsed.core?.careerLevel?.code || '',
+      salaryFrom: parsed.workConditions?.salary?.amountMin?.toString() || '',
+      salaryTo: parsed.workConditions?.salary?.amountMax?.toString() || '',
+      currency: parsed.workConditions?.salary?.currency || 'RUB',
+      description: parsed.responsibilities?.scope || '',
+      responsibilities: parsed.responsibilities?.zones || [],
+      requirements: parsed.requirements?.skills
+        ?.filter(s => s.isRequired)
+        .map(s => s.name) || [],
+      niceToHave: parsed.requirements?.skills
+        ?.filter(s => !s.isRequired)
+        .map(s => s.name) || [],
+      benefits: parsed.company?.benefits?.map(b => b.name || '') || [],
+    };
   };
 
-  const canProceed = mode === 'file' ? file !== null : text.trim().length > 50;
+  const handleSubmit = async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Создаём сессию
+      const session = await createSession();
+
+      // Загружаем и парсим
+      let result: ParseResponse;
+      if (mode === 'file' && file) {
+        result = await uploadFile(session.session_id, file);
+      } else {
+        result = await uploadText(session.session_id, text);
+      }
+
+      setParseResult(result);
+
+      // Конвертируем в VacancyData для совместимости
+      const vacancyData = convertParsedDataToVacancyData(result.parsed_data);
+      setVacancyData(vacancyData);
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Произошла ошибка при обработке');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleNext = () => {
-    // Симуляция данных после обработки
-    setVacancyData({
-      title: 'Senior Frontend Developer',
-      department: 'Engineering',
-      location: 'Москва',
-      employmentType: 'full-time',
-      experienceLevel: 'senior',
-      salaryFrom: '250000',
-      salaryTo: '400000',
-      currency: 'RUB',
-      description: 'Мы ищем опытного Frontend разработчика для работы над высоконагруженными проектами.',
-      responsibilities: [
-        'Разработка и поддержка пользовательских интерфейсов',
-        'Код-ревью и менторинг младших разработчиков',
-        'Участие в архитектурных решениях',
-      ],
-      requirements: [
-        'Опыт работы с React от 4 лет',
-        'Глубокое знание TypeScript',
-        'Опыт работы с REST API и GraphQL',
-      ],
-      niceToHave: [
-        'Опыт работы с Next.js',
-        'Знание принципов CI/CD',
-      ],
-      benefits: [
-        'Гибкий график работы',
-        'ДМС со стоматологией',
-        'Компенсация обучения',
-      ],
-    });
-    onNext();
+    if (parseResult) {
+      onNext(parseResult.session_id, parseResult.parsed_data, parseResult.completion_percent);
+    }
   };
+
+  // Показываем анимацию во время анализа
+  if (isLoading) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <AnalyzingAnimation
+          message={mode === 'file' ? 'Анализируем файл...' : 'Анализируем текст...'}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -141,8 +177,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           <p className="font-medium">Как это работает?</p>
           <p className="mt-1 text-blue-700">
             Загрузите файл с описанием вакансии или введите текст вручную. Система проанализирует
-            содержимое и предложит уточняющие вопросы в формате теста для заполнения всех
-            необходимых полей вакансии.
+            содержимое с помощью ИИ и извлечёт структурированные данные для заполнения вакансии.
           </p>
         </div>
       </div>
@@ -153,13 +188,16 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           onClick={() => {
             setMode('file');
             setError(null);
+            setParseResult(null);
           }}
+          disabled={isLoading}
           className={`
             flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium sidebar-transition
             ${mode === 'file'
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-600 hover:text-gray-900'
             }
+            ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}
           `}
         >
           <Upload size={18} strokeWidth={2} />
@@ -169,13 +207,16 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           onClick={() => {
             setMode('text');
             setError(null);
+            setParseResult(null);
           }}
+          disabled={isLoading}
           className={`
             flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium sidebar-transition
             ${mode === 'text'
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-600 hover:text-gray-900'
             }
+            ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}
           `}
         >
           <Type size={18} strokeWidth={2} />
@@ -191,7 +232,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => !isLoading && fileInputRef.current?.click()}
               className={`
                 border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer
                 sidebar-transition
@@ -199,6 +240,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
                   ? 'border-gray-900 bg-gray-50'
                   : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50/50'
                 }
+                ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}
               `}
             >
               <input
@@ -207,6 +249,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
                 accept={ALLOWED_EXTENSIONS.join(',')}
                 onChange={handleFileSelect}
                 className="hidden"
+                disabled={isLoading}
               />
               <div className="flex flex-col items-center">
                 <div
@@ -229,7 +272,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
                   или <span className="text-gray-900 underline">выберите на компьютере</span>
                 </p>
                 <p className="text-gray-400 text-xs mt-4">
-                  PDF, Word, TXT • Максимум 2 МБ
+                  PDF, Word, TXT • Максимум 10 МБ
                 </p>
               </div>
             </div>
@@ -238,7 +281,7 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-gray-100 rounded-xl flex items-center justify-center">
-                    {getFileIcon(file.name)}
+                    <File size={20} strokeWidth={2} className="text-gray-500" />
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">{file.name}</p>
@@ -247,18 +290,12 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
                 </div>
                 <button
                   onClick={handleRemoveFile}
-                  className="p-2 hover:bg-gray-100 rounded-lg sidebar-transition"
+                  disabled={isLoading}
+                  className="p-2 hover:bg-gray-100 rounded-lg sidebar-transition disabled:opacity-50"
                 >
                   <X size={18} strokeWidth={2} className="text-gray-500" />
                 </button>
               </div>
-            </div>
-          )}
-
-          {error && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
-              <AlertCircle size={18} strokeWidth={2} />
-              {error}
             </div>
           )}
         </div>
@@ -270,7 +307,11 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           <div className="relative">
             <textarea
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(e) => {
+                setText(e.target.value);
+                setParseResult(null);
+              }}
+              disabled={isLoading}
               placeholder="Вставьте или введите описание вакансии...
 
 Например:
@@ -280,38 +321,97 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
               className="w-full h-64 p-4 border border-gray-200 rounded-2xl resize-none
                          text-gray-900 placeholder:text-gray-400
                          focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300
-                         sidebar-transition"
+                         sidebar-transition disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <div className="absolute bottom-3 right-3 text-xs text-gray-400">
               {text.length} символов
             </div>
           </div>
-          {text.length > 0 && text.length < 50 && (
-            <p className="text-sm text-amber-600 flex items-center gap-2">
-              <AlertCircle size={16} strokeWidth={2} />
-              Введите минимум 50 символов для анализа
-            </p>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {error && (
+        <div className="mt-4 flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl text-sm text-red-700">
+          <AlertCircle size={18} strokeWidth={2} />
+          {error}
+        </div>
+      )}
+
+      {/* Parse Result */}
+      {parseResult && (
+        <div className="mt-4 p-4 bg-green-50 border border-green-100 rounded-xl">
+          <div className="flex items-center gap-2 text-green-800 font-medium">
+            <CheckCircle2 size={20} strokeWidth={2} />
+            Анализ завершён
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-green-600">Заполненность</p>
+              <div className="mt-1 flex items-center gap-2">
+                <div className="flex-1 h-2 bg-green-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-green-600 rounded-full"
+                    style={{ width: `${parseResult.completion_percent}%` }}
+                  />
+                </div>
+                <span className="text-sm font-semibold text-green-800">
+                  {parseResult.completion_percent}%
+                </span>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-green-600">Уверенность ИИ</p>
+              <p className="text-sm font-semibold text-green-800 mt-1">
+                {Math.round(parseResult.confidence * 100)}%
+              </p>
+            </div>
+          </div>
+          {parseResult.warnings && parseResult.warnings.length > 0 && (
+            <div className="mt-3 p-2 bg-amber-50 rounded-lg">
+              <p className="text-xs text-amber-700">
+                {parseResult.warnings.join('. ')}
+              </p>
+            </div>
+          )}
+          {parseResult.missing_fields && parseResult.missing_fields.length > 0 && (
+            <div className="mt-2">
+              <p className="text-xs text-green-600">
+                Не удалось извлечь: {parseResult.missing_fields.join(', ')}
+              </p>
+            </div>
           )}
         </div>
       )}
 
-      {/* Action Button */}
-      <div className="mt-8 flex justify-end">
-        <button
-          onClick={handleNext}
-          disabled={!canProceed}
-          className={`
-            flex items-center gap-2 px-6 py-3 rounded-xl font-medium text-sm
-            sidebar-transition
-            ${canProceed
-              ? 'bg-gray-900 text-white hover:bg-gray-800'
-              : 'bg-gray-200 text-gray-500 cursor-not-allowed'
-            }
-          `}
-        >
-          Продолжить
-          <ArrowRight size={18} strokeWidth={2} />
-        </button>
+      {/* Action Buttons */}
+      <div className="mt-8 flex justify-end gap-3">
+        {!parseResult ? (
+          <button
+            onClick={handleSubmit}
+            disabled={!canProceed}
+            className={`
+              flex items-center gap-2 px-6 py-3 rounded-xl font-medium text-sm
+              sidebar-transition
+              ${canProceed
+                ? 'bg-gray-900 text-white hover:bg-gray-800'
+                : 'bg-gray-200 text-gray-500 cursor-not-allowed'
+              }
+            `}
+          >
+            Анализировать
+            <ArrowRight size={18} strokeWidth={2} />
+          </button>
+        ) : (
+          <button
+            onClick={handleNext}
+            className="flex items-center gap-2 px-6 py-3 rounded-xl font-medium text-sm
+                       bg-gray-900 text-white hover:bg-gray-800 sidebar-transition"
+          >
+            Продолжить
+            <ArrowRight size={18} strokeWidth={2} />
+          </button>
+        )}
       </div>
     </div>
   );

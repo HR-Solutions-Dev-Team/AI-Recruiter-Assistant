@@ -7,6 +7,7 @@ import UploadStep from '../components/vacancy/UploadStep';
 import ChatStep from '../components/vacancy/ChatStep';
 import EditStep from '../components/vacancy/EditStep';
 import PreviewStep from '../components/vacancy/PreviewStep';
+import type { VacancyInput } from '../types/vacancy';
 
 const STEPS = [
   { id: 1, title: 'Загрузка' },
@@ -52,11 +53,25 @@ export default function VacancyCreate() {
   const [currentStep, setCurrentStep] = useState(1);
   const [vacancyData, setVacancyData] = useState<VacancyData>(initialVacancyData);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [completionPercent, setCompletionPercent] = useState(0);
+  const [parsedVacancyInput, setParsedVacancyInput] = useState<VacancyInput | null>(null);
 
   const handleNextStep = () => {
     if (currentStep < 4) {
       setCurrentStep(currentStep + 1);
     }
+  };
+
+  const handleUploadComplete = (
+    newSessionId: string,
+    parsedData: VacancyInput,
+    newCompletionPercent: number
+  ) => {
+    setSessionId(newSessionId);
+    setParsedVacancyInput(parsedData);
+    setCompletionPercent(newCompletionPercent);
+    setCurrentStep(2);
   };
 
   const handleCancel = () => {
@@ -108,7 +123,7 @@ export default function VacancyCreate() {
       <div className="mt-8">
         {currentStep === 1 && (
           <UploadStep
-            onNext={handleNextStep}
+            onNext={handleUploadComplete}
             setVacancyData={setVacancyData}
           />
         )}
@@ -117,6 +132,7 @@ export default function VacancyCreate() {
             onNext={handleNextStep}
             vacancyData={vacancyData}
             setVacancyData={setVacancyData}
+            completionPercent={completionPercent}
           />
         )}
         {currentStep === 3 && (

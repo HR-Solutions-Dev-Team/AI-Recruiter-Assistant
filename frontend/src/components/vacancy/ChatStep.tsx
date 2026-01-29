@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, SkipForward, ArrowRight } from 'lucide-react';
+import { Send, Bot, User, SkipForward, ArrowRight, CheckCircle } from 'lucide-react';
 import type { VacancyData } from '../../pages/VacancyCreate';
 
 interface ChatStepProps {
   onNext: () => void;
   vacancyData: VacancyData;
   setVacancyData: React.Dispatch<React.SetStateAction<VacancyData>>;
+  completionPercent: number;
 }
 
 interface Question {
@@ -58,7 +59,7 @@ const QUESTIONS: Omit<Question, 'answered'>[] = [
   },
 ];
 
-export default function ChatStep({ onNext, vacancyData, setVacancyData }: ChatStepProps) {
+export default function ChatStep({ onNext, vacancyData, setVacancyData, completionPercent }: ChatStepProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [customInput, setCustomInput] = useState('');
@@ -78,7 +79,7 @@ export default function ChatStep({ onNext, vacancyData, setVacancyData }: ChatSt
         {
           id: 1,
           type: 'bot',
-          content: `Отлично! Я проанализировал описание вакансии "${vacancyData.title || 'Senior Frontend Developer'}". Теперь мне нужно уточнить несколько деталей для формирования полного описания. Выберите подходящий вариант или укажите свой.`,
+          content: `Отлично! Я проанализировал описание вакансии "${vacancyData.title || 'Senior Frontend Developer'}". Заполненность: ${completionPercent}%. Теперь мне нужно уточнить несколько деталей для улучшения описания. Выберите подходящий вариант или укажите свой.`,
         },
         {
           id: 2,
@@ -140,6 +141,21 @@ export default function ChatStep({ onNext, vacancyData, setVacancyData }: ChatSt
     handleOptionSelect('Пропущено');
   };
 
+  const handleFinishEnrichment = () => {
+    // Добавляем сообщение о завершении
+    const finishMessage: Message = {
+      id: messages.length + 1,
+      type: 'bot',
+      content: 'Хорошо! Переходим к редактированию вакансии. Вы сможете дополнить недостающие поля вручную.',
+    };
+    setMessages((prev) => [...prev, finishMessage]);
+
+    // Переходим к следующему шагу
+    setTimeout(() => {
+      onNext();
+    }, 500);
+  };
+
   const currentQuestion = currentQuestionIndex < totalQuestions ? QUESTIONS[currentQuestionIndex] : null;
 
   return (
@@ -156,9 +172,14 @@ export default function ChatStep({ onNext, vacancyData, setVacancyData }: ChatSt
             style={{ width: `${progress}%` }}
           />
         </div>
-        <p className="text-xs text-gray-500 mt-1">
-          Вопрос {Math.min(currentQuestionIndex + 1, totalQuestions)} из {totalQuestions}
-        </p>
+        <div className="flex items-center justify-between mt-1">
+          <p className="text-xs text-gray-500">
+            Вопрос {Math.min(currentQuestionIndex + 1, totalQuestions)} из {totalQuestions}
+          </p>
+          <p className="text-xs text-gray-500">
+            Заполненность вакансии: {completionPercent}%
+          </p>
+        </div>
       </div>
 
       {/* Chat Container */}
@@ -279,6 +300,19 @@ export default function ChatStep({ onNext, vacancyData, setVacancyData }: ChatSt
                 </button>
               </div>
             )}
+
+            {/* Finish Enrichment Button */}
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <button
+                onClick={handleFinishEnrichment}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3
+                           bg-gray-100 text-gray-700 rounded-xl font-medium text-sm
+                           hover:bg-gray-200 sidebar-transition"
+              >
+                <CheckCircle size={18} strokeWidth={2} />
+                Завершить обогащение и перейти к редактированию
+              </button>
+            </div>
           </div>
         )}
 
