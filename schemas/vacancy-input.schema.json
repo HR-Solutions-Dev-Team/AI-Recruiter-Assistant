@@ -1,0 +1,672 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "vacancy-input.schema.json",
+  "title": "VacancyInput",
+  "description": "Схема входных параметров для создания вакансии. Рассчитана на поиск редких и узкоспециализированных специалистов (5-10 кандидатов на вакансию).",
+  "type": "object",
+
+  "required": ["core"],
+
+  "properties": {
+
+    "core": {
+      "title": "Ядро вакансии (обязательный блок)",
+      "description": "Минимально необходимая информация для создания вакансии. Без этих данных генерация невозможна.",
+      "type": "object",
+      "required": ["jobTitle"],
+      "properties": {
+        "jobTitle": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 200,
+          "description": "Название должности/роли. Ключевой параметр.",
+          "examples": ["Senior Data Engineer", "Head of Product", "Lead ML Engineer"]
+        },
+        "synonyms": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Альтернативные названия роли для расширения поиска",
+          "examples": [["Data Platform Engineer", "Big Data Engineer", "ETL Developer"]]
+        },
+        "careerLevel": {
+          "type": "object",
+          "description": "Уровень позиции в карьерной иерархии",
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": ["intern", "junior", "middle", "senior", "lead", "head", "director", "c-level"],
+              "description": "Код уровня"
+            },
+            "experienceYearsMin": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Минимальный опыт в годах"
+            },
+            "experienceYearsMax": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Максимальный опыт в годах"
+            }
+          }
+        },
+        "industry": {
+          "type": "object",
+          "description": "Отрасль/индустрия",
+          "properties": {
+            "id": { "type": "string", "description": "ID из справочника (если есть)" },
+            "name": { "type": "string", "description": "Название отрасли" },
+            "subIndustry": { "type": "string", "description": "Подотрасль" }
+          }
+        }
+      }
+    },
+
+    "company": {
+      "title": "Компания",
+      "description": "Информация о компании-работодателе. Если блок заполнен — доступны все вложенные поля.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Название компании (обязательно при заполнении блока)"
+        },
+        "externalId": {
+          "type": "string",
+          "description": "Внешний идентификатор компании (если есть в другой системе)"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["startup", "sme", "enterprise", "corporation", "government", "ngo", "consulting"],
+          "description": "Тип компании"
+        },
+        "size": {
+          "type": "string",
+          "enum": ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5000+"],
+          "description": "Размер компании по количеству сотрудников"
+        },
+        "industryId": {
+          "type": "string",
+          "description": "ID отрасли компании (может отличаться от отрасли вакансии)"
+        },
+        "okved": {
+          "type": "string",
+          "description": "Код ОКВЭД (для российских компаний)"
+        },
+        "benefits": {
+          "type": "array",
+          "description": "Бенефиты компании. Зависит от заполнения блока company.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "description": "ID из справочника бенефитов" },
+              "name": { "type": "string", "description": "Название бенефита (для новых)" }
+            }
+          },
+          "examples": [[
+            {"name": "ДМС"},
+            {"name": "Опционы"},
+            {"name": "Удалённая работа"},
+            {"name": "Гибкий график"}
+          ]]
+        },
+        "publicLinks": {
+          "type": "array",
+          "description": "Публичные ссылки компании. Зависит от заполнения блока company.",
+          "items": {
+            "type": "object",
+            "required": ["type", "url"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["site", "hh", "linkedin", "habr", "glassdoor", "github", "other"],
+                "description": "Тип ссылки"
+              },
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "description": "URL"
+              }
+            }
+          }
+        }
+      },
+      "if": {
+        "properties": { "name": { "minLength": 1 } },
+        "required": ["name"]
+      },
+      "then": {
+        "description": "Если указано название компании — все вложенные поля доступны для заполнения"
+      }
+    },
+
+    "classification": {
+      "title": "Классификация позиции",
+      "description": "Детальная классификация для точного позиционирования роли",
+      "type": "object",
+      "properties": {
+        "businessFunction": {
+          "type": "object",
+          "description": "Бизнес-функция (IT, Finance, HR, Marketing и т.д.)",
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        "roleFamily": {
+          "type": "object",
+          "description": "Семейство ролей (Engineering, Management, Analytics и т.д.)",
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        },
+        "orgLevel": {
+          "type": "object",
+          "description": "Организационный уровень",
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": ["ic", "team_lead", "manager", "senior_manager", "director", "vp", "c_level"],
+              "description": "IC = Individual Contributor"
+            },
+            "name": { "type": "string" }
+          }
+        },
+        "businessModel": {
+          "type": "object",
+          "description": "Бизнес-модель компании/продукта",
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string" },
+            "segment": {
+              "type": "string",
+              "enum": ["B2B", "B2C", "B2B2C", "B2G", "C2C", "D2C"],
+              "description": "Сегмент рынка"
+            }
+          }
+        },
+        "projectType": {
+          "type": "string",
+          "description": "Тип проекта (продукт, аутсорс, аутстафф, стартап, R&D и т.д.)"
+        }
+      }
+    },
+
+    "workConditions": {
+      "title": "Условия работы",
+      "description": "Формат, график и компенсация",
+      "type": "object",
+      "properties": {
+        "employmentType": {
+          "type": "object",
+          "description": "Тип занятости",
+          "properties": {
+            "id": { "type": "string" },
+            "name": {
+              "type": "string",
+              "enum": ["full-time", "part-time", "contract", "freelance", "internship", "temporary"],
+              "description": "Тип занятости"
+            }
+          }
+        },
+        "schedule": {
+          "type": "object",
+          "description": "График работы",
+          "properties": {
+            "id": { "type": "string" },
+            "name": {
+              "type": "string",
+              "enum": ["5/2", "2/2", "flexible", "shift", "remote-async", "hybrid"],
+              "description": "Тип графика"
+            }
+          }
+        },
+        "workHours": {
+          "type": "string",
+          "description": "Часы/окно работы (например: '10:00-19:00 MSK', 'overlap с US EST')"
+        },
+        "salary": {
+          "type": "object",
+          "description": "Компенсация",
+          "properties": {
+            "amountMin": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Минимальная граница (gross/net указать в комментарии)"
+            },
+            "amountMax": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Максимальная граница"
+            },
+            "currency": {
+              "type": "string",
+              "default": "RUB",
+              "enum": ["RUB", "USD", "EUR", "GBP", "KZT", "BYN", "UAH", "GEL", "AMD", "AZN"],
+              "description": "Валюта"
+            },
+            "period": {
+              "type": "string",
+              "enum": ["month", "year", "hour", "project"],
+              "default": "month",
+              "description": "Период выплаты"
+            },
+            "comment": {
+              "type": "string",
+              "description": "Комментарий (gross/net, бонусы и т.д.)"
+            }
+          }
+        },
+        "location": {
+          "type": "object",
+          "description": "Локация",
+          "properties": {
+            "city": { "type": "string", "description": "Город" },
+            "region": { "type": "string", "description": "Регион/область" },
+            "country": { "type": "string", "description": "Страна" },
+            "remote": {
+              "type": "string",
+              "enum": ["office", "remote", "hybrid", "relocate"],
+              "description": "Формат работы"
+            },
+            "relocationSupport": {
+              "type": "boolean",
+              "description": "Помощь с релокацией"
+            },
+            "visaSupport": {
+              "type": "boolean",
+              "description": "Помощь с визой"
+            }
+          }
+        }
+      }
+    },
+
+    "requirements": {
+      "title": "Требования к кандидату",
+      "description": "Образование, опыт, навыки, языки",
+      "type": "object",
+      "properties": {
+        "education": {
+          "type": "object",
+          "description": "Требования к образованию",
+          "properties": {
+            "level": {
+              "type": "string",
+              "enum": ["any", "secondary", "bachelor", "master", "phd", "mba"],
+              "description": "Уровень образования"
+            },
+            "fields": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Направления/специальности",
+              "examples": [["Computer Science", "Applied Mathematics", "Physics"]]
+            },
+            "comment": {
+              "type": "string",
+              "description": "Дополнительные требования к образованию"
+            }
+          }
+        },
+        "experience": {
+          "type": "object",
+          "description": "Требования к опыту",
+          "properties": {
+            "yearsMin": { "type": "integer", "minimum": 0 },
+            "yearsMax": { "type": "integer", "minimum": 0 },
+            "domains": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Домены/области опыта",
+              "examples": [["FinTech", "High-load systems", "ML/AI"]]
+            },
+            "mustHave": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Обязательный опыт",
+              "examples": [["Опыт работы с распределёнными системами", "Управление командой от 5 человек"]]
+            },
+            "niceToHave": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Желательный опыт"
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "description": "Навыки и компетенции. Гибридный подход: можно выбрать из справочника или добавить новый.",
+          "items": {
+            "type": "object",
+            "required": ["name", "category"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "ID из справочника навыков (если существует)"
+              },
+              "name": {
+                "type": "string",
+                "description": "Название навыка"
+              },
+              "category": {
+                "type": "string",
+                "enum": ["hard", "soft", "management", "digital_tool"],
+                "description": "Категория навыка"
+              },
+              "isRequired": {
+                "type": "boolean",
+                "default": true,
+                "description": "Must-have или nice-to-have"
+              },
+              "level": {
+                "type": "string",
+                "enum": ["basic", "intermediate", "advanced", "expert"],
+                "description": "Требуемый уровень владения"
+              },
+              "comment": {
+                "type": "string",
+                "description": "Пояснение (например: '3+ года production experience')"
+              }
+            }
+          },
+          "examples": [[
+            {"name": "Python", "category": "hard", "isRequired": true, "level": "expert"},
+            {"name": "Apache Spark", "category": "hard", "isRequired": true, "level": "advanced"},
+            {"name": "Kubernetes", "category": "digital_tool", "isRequired": false, "level": "intermediate"},
+            {"name": "Системное мышление", "category": "soft", "isRequired": true},
+            {"name": "Менторство", "category": "management", "isRequired": true}
+          ]]
+        },
+        "languages": {
+          "type": "array",
+          "description": "Требования к языкам",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "id": { "type": "string", "description": "ID из справочника языков" },
+              "code": { "type": "string", "description": "ISO код (ru, en, de и т.д.)" },
+              "name": { "type": "string", "description": "Название языка" },
+              "proficiency": {
+                "type": "string",
+                "enum": ["A1", "A2", "B1", "B2", "C1", "C2", "native"],
+                "description": "Уровень владения (CEFR)"
+              },
+              "isRequired": {
+                "type": "boolean",
+                "default": true,
+                "description": "Обязательное требование"
+              }
+            }
+          },
+          "examples": [[
+            {"code": "ru", "name": "Русский", "proficiency": "native", "isRequired": true},
+            {"code": "en", "name": "Английский", "proficiency": "B2", "isRequired": true}
+          ]]
+        }
+      }
+    },
+
+    "responsibilities": {
+      "title": "Обязанности и зоны ответственности",
+      "description": "Что предстоит делать на позиции",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "type": "string",
+          "description": "Общее описание зоны ответственности"
+        },
+        "zones": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Конкретные зоны ответственности",
+          "examples": [[
+            "Проектирование архитектуры data pipeline",
+            "Code review и менторство команды",
+            "Взаимодействие с Data Science командой"
+          ]]
+        },
+        "competencyModel": {
+          "type": "string",
+          "description": "Модель компетенций (если есть корпоративная)"
+        },
+        "businessProcesses": {
+          "type": "array",
+          "description": "Бизнес-процессы, в которых участвует роль. Двухуровневая иерархия: процесс → подпроцессы.",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "id": { "type": "string", "description": "ID процесса из справочника" },
+              "name": { "type": "string", "description": "Название процесса" },
+              "subprocesses": {
+                "type": "array",
+                "description": "Подпроцессы внутри данного процесса. Доступны только если указан родительский процесс.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "name": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "examples": [[
+            {
+              "name": "Data Engineering",
+              "subprocesses": [
+                {"name": "ETL/ELT разработка"},
+                {"name": "Data Quality"},
+                {"name": "Data Governance"}
+              ]
+            },
+            {
+              "name": "Development",
+              "subprocesses": [
+                {"name": "Code Review"},
+                {"name": "Architecture Design"}
+              ]
+            }
+          ]]
+        }
+      }
+    },
+
+    "orgStructure": {
+      "title": "Организационная структура",
+      "description": "Место роли в оргструктуре, команда и взаимодействия",
+      "type": "object",
+      "properties": {
+        "reportsTo": {
+          "type": "string",
+          "description": "Кому подчиняется (название роли)",
+          "examples": ["CTO", "Head of Data", "VP of Engineering"]
+        },
+        "subordinatesCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Количество подчинённых (0 = IC)"
+        },
+        "orgUnit": {
+          "type": "string",
+          "description": "Название подразделения/отдела",
+          "examples": ["Data Platform Team", "Core Engineering"]
+        },
+        "teamRoles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Роли в команде, с которыми предстоит работать",
+          "examples": [["Data Analyst", "ML Engineer", "Backend Developer", "DevOps"]]
+        },
+        "crossFunctionalLinks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Кросс-функциональные взаимодействия (другие отделы/команды)",
+          "examples": [["Product", "Analytics", "Infrastructure", "Security"]]
+        }
+      }
+    },
+
+    "fullText": {
+      "title": "Полный текст вакансии",
+      "description": "Если текст уже готов — можно передать его напрямую. Система сохранит версию.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Полный текст описания вакансии"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["manual", "generated", "imported"],
+          "description": "Источник текста"
+        }
+      }
+    },
+
+    "metadata": {
+      "title": "Метаданные",
+      "description": "Служебная информация",
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["draft", "review", "active", "paused", "closed", "archived"],
+          "default": "draft",
+          "description": "Статус вакансии"
+        },
+        "priority": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "urgent"],
+          "description": "Приоритет закрытия"
+        },
+        "deadline": {
+          "type": "string",
+          "format": "date",
+          "description": "Желаемая дата закрытия"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Теги для внутренней классификации"
+        }
+      }
+    }
+  },
+
+  "definitions": {
+    "hierarchyLevels": {
+      "description": "Иерархия зависимостей между блоками. Если родительский блок не заполнен — дочерние поля пропускаются.",
+      "type": "object",
+      "properties": {
+        "level1_core": {
+          "description": "ОБЯЗАТЕЛЬНЫЙ. Без core.jobTitle создание невозможно.",
+          "required": true,
+          "fields": ["core.jobTitle", "core.synonyms", "core.careerLevel", "core.industry"]
+        },
+        "level2_company": {
+          "description": "Если company.name заполнено — открываются все поля компании",
+          "dependsOn": "company.name",
+          "fields": ["company.*", "company.benefits", "company.publicLinks"]
+        },
+        "level3_classification": {
+          "description": "Детализация классификации. Рекомендуется после core.",
+          "dependsOn": "core.industry",
+          "fields": ["classification.*"]
+        },
+        "level4_workConditions": {
+          "description": "Условия работы. Независимый блок.",
+          "fields": ["workConditions.*"]
+        },
+        "level5_requirements": {
+          "description": "Требования. Рекомендуется после classification для контекста.",
+          "fields": ["requirements.*"]
+        },
+        "level6_responsibilities": {
+          "description": "Обязанности. businessProcesses.subprocesses зависят от businessProcesses.name",
+          "fields": ["responsibilities.*"]
+        },
+        "level7_orgStructure": {
+          "description": "Оргструктура. Рекомендуется после company.",
+          "dependsOn": "company.name",
+          "fields": ["orgStructure.*"]
+        }
+      }
+    },
+
+    "keyParameters": {
+      "description": "Ключевые параметры для MVP. Минимум для качественной генерации JD.",
+      "critical": [
+        "core.jobTitle",
+        "core.careerLevel.code",
+        "requirements.skills (минимум 3-5 hard skills)"
+      ],
+      "important": [
+        "core.industry",
+        "company.name",
+        "workConditions.salary",
+        "workConditions.location",
+        "requirements.experience",
+        "responsibilities.zones"
+      ],
+      "recommended": [
+        "core.synonyms",
+        "classification.businessFunction",
+        "classification.roleFamily",
+        "requirements.languages",
+        "orgStructure.reportsTo",
+        "orgStructure.teamRoles"
+      ]
+    },
+
+    "inputFlowRecommendation": {
+      "description": "Рекомендуемый порядок заполнения для интерфейса",
+      "steps": [
+        {
+          "step": 1,
+          "name": "Базовая информация",
+          "fields": ["core.jobTitle", "core.synonyms", "core.careerLevel"],
+          "required": true
+        },
+        {
+          "step": 2,
+          "name": "Компания",
+          "fields": ["company.name", "company.type", "company.size", "company.benefits"],
+          "conditional": "Пропустить если компания конфиденциальна"
+        },
+        {
+          "step": 3,
+          "name": "Классификация",
+          "fields": ["core.industry", "classification.businessFunction", "classification.roleFamily"],
+          "required": false
+        },
+        {
+          "step": 4,
+          "name": "Условия работы",
+          "fields": ["workConditions.salary", "workConditions.location", "workConditions.employmentType"],
+          "required": false
+        },
+        {
+          "step": 5,
+          "name": "Требования",
+          "fields": ["requirements.skills", "requirements.experience", "requirements.languages"],
+          "required": true,
+          "note": "Критично для поиска редких специалистов"
+        },
+        {
+          "step": 6,
+          "name": "Обязанности",
+          "fields": ["responsibilities.zones", "responsibilities.businessProcesses"],
+          "required": false
+        },
+        {
+          "step": 7,
+          "name": "Оргструктура",
+          "fields": ["orgStructure.reportsTo", "orgStructure.teamRoles", "orgStructure.crossFunctionalLinks"],
+          "conditional": "Если company заполнена"
+        }
+      ]
+    }
+  }
+}

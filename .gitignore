@@ -1,3 +1,4 @@
 PROJECT.MD
 .gitignore
 .env
+/backend/.env.example
