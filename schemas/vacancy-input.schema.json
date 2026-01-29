@@ -92,22 +92,47 @@
           "type": "string",
           "description": "Код ОКВЭД (для российских компаний)"
         },
-        "benefits": {
-          "type": "array",
-          "description": "Бенефиты компании. Зависит от заполнения блока company.",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": { "type": "string", "description": "ID из справочника бенефитов" },
-              "name": { "type": "string", "description": "Название бенефита (для новых)" }
+        "activitySphere": {
+          "type": "object",
+          "description": "Сфера деятельности компании (иерархическая структура для поиска узкоспециализированных кандидатов)",
+          "properties": {
+            "sphere": {
+              "type": "object",
+              "description": "Основная сфера деятельности",
+              "properties": {
+                "id": { "type": "string", "description": "ID из справочника сфер" },
+                "name": { "type": "string", "description": "Название сферы" }
+              }
+            },
+            "subSphere": {
+              "type": "object",
+              "description": "Подсфера деятельности (зависит от выбранной сферы)",
+              "properties": {
+                "id": { "type": "string", "description": "ID из справочника подсфер" },
+                "name": { "type": "string", "description": "Название подсферы" }
+              }
+            },
+            "specialization": {
+              "type": "object",
+              "description": "Специализация (зависит от выбранной подсферы)",
+              "properties": {
+                "id": { "type": "string", "description": "ID из справочника специализаций" },
+                "name": { "type": "string", "description": "Название специализации" }
+              }
             }
           },
-          "examples": [[
-            {"name": "ДМС"},
-            {"name": "Опционы"},
-            {"name": "Удалённая работа"},
-            {"name": "Гибкий график"}
-          ]]
+          "examples": [
+            {
+              "sphere": {"name": "Информационные технологии"},
+              "subSphere": {"name": "Финансовые технологии"},
+              "specialization": {"name": "Платёжные системы"}
+            },
+            {
+              "sphere": {"name": "Общественное питание"},
+              "subSphere": {"name": "Рестораны"},
+              "specialization": {"name": "Кафе"}
+            }
+          ]
         },
         "publicLinks": {
           "type": "array",
@@ -568,7 +593,7 @@
         "level2_company": {
           "description": "Если company.name заполнено — открываются все поля компании",
           "dependsOn": "company.name",
-          "fields": ["company.*", "company.benefits", "company.publicLinks"]
+          "fields": ["company.*", "company.activitySphere", "company.publicLinks"]
         },
         "level3_classification": {
           "description": "Детализация классификации. Рекомендуется после core.",
@@ -632,7 +657,7 @@
         {
           "step": 2,
           "name": "Компания",
-          "fields": ["company.name", "company.type", "company.size", "company.benefits"],
+          "fields": ["company.name", "company.type", "company.size", "company.activitySphere"],
           "conditional": "Пропустить если компания конфиденциальна"
         },
         {

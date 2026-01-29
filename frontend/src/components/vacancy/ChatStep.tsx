@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, SkipForward, ArrowRight, CheckCircle } from 'lucide-react';
-import type { VacancyData } from '../../pages/VacancyCreate';
+import type { VacancyInput } from '../../types/vacancy';
 
 interface ChatStepProps {
   onNext: () => void;
-  vacancyData: VacancyData;
-  setVacancyData: React.Dispatch<React.SetStateAction<VacancyData>>;
+  vacancyData: VacancyInput;
+  setVacancyData: React.Dispatch<React.SetStateAction<VacancyInput>>;
   completionPercent: number;
 }
 
@@ -53,9 +53,9 @@ const QUESTIONS: Omit<Question, 'answered'>[] = [
   },
   {
     id: 5,
-    text: 'Какие бенефиты предлагает компания?',
-    field: 'benefits',
-    options: ['ДМС со стоматологией', 'Гибкий график', 'Компенсация обучения'],
+    text: 'В какой сфере деятельности работает компания?',
+    field: 'activitySphere',
+    options: ['Информационные технологии', 'Финансы и банкинг', 'Розничная торговля'],
   },
 ];
 
@@ -79,7 +79,7 @@ export default function ChatStep({ onNext, vacancyData, setVacancyData, completi
         {
           id: 1,
           type: 'bot',
-          content: `Отлично! Я проанализировал описание вакансии "${vacancyData.title || 'Senior Frontend Developer'}". Заполненность: ${completionPercent}%. Теперь мне нужно уточнить несколько деталей для улучшения описания. Выберите подходящий вариант или укажите свой.`,
+          content: `Отлично! Я проанализировал описание вакансии "${vacancyData.core?.jobTitle || 'Вакансия'}". Заполненность: ${completionPercent}%. Теперь мне нужно уточнить несколько деталей для улучшения описания. Выберите подходящий вариант или укажите свой.`,
         },
         {
           id: 2,

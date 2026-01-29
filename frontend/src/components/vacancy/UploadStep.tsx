@@ -1,7 +1,6 @@
 import { useState, useRef, DragEvent, ChangeEvent } from 'react';
 import { Upload, Type, AlertCircle, File, X, Info, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { createSession, uploadText, uploadFile, type ParseResponse } from '../../api';
-import type { VacancyData } from '../../pages/VacancyCreate';
 import type { VacancyInput } from '../../types/vacancy';
 import AnalyzingAnimation from './AnalyzingAnimation';
 
@@ -9,7 +8,7 @@ type InputMode = 'file' | 'text';
 
 interface UploadStepProps {
   onNext: (sessionId: string, parsedData: VacancyInput, completionPercent: number) => void;
-  setVacancyData: React.Dispatch<React.SetStateAction<VacancyData>>;
+  setVacancyData: React.Dispatch<React.SetStateAction<VacancyInput>>;
 }
 
 const ALLOWED_TYPES = [
@@ -100,28 +99,6 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
 
   const canProceed = mode === 'file' ? file !== null : text.trim().length > 0;
 
-  const convertParsedDataToVacancyData = (parsed: VacancyInput): VacancyData => {
-    return {
-      title: parsed.core?.jobTitle || '',
-      department: parsed.classification?.businessFunction?.name || '',
-      location: parsed.workConditions?.location?.city || '',
-      employmentType: parsed.workConditions?.employmentType?.name || '',
-      experienceLevel: parsed.core?.careerLevel?.code || '',
-      salaryFrom: parsed.workConditions?.salary?.amountMin?.toString() || '',
-      salaryTo: parsed.workConditions?.salary?.amountMax?.toString() || '',
-      currency: parsed.workConditions?.salary?.currency || 'RUB',
-      description: parsed.responsibilities?.scope || '',
-      responsibilities: parsed.responsibilities?.zones || [],
-      requirements: parsed.requirements?.skills
-        ?.filter(s => s.isRequired)
-        .map(s => s.name) || [],
-      niceToHave: parsed.requirements?.skills
-        ?.filter(s => !s.isRequired)
-        .map(s => s.name) || [],
-      benefits: parsed.company?.benefits?.map(b => b.name || '') || [],
-    };
-  };
-
   const handleSubmit = async () => {
     setIsLoading(true);
     setError(null);
@@ -140,9 +117,8 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
 
       setParseResult(result);
 
-      // Конвертируем в VacancyData для совместимости
-      const vacancyData = convertParsedDataToVacancyData(result.parsed_data);
-      setVacancyData(vacancyData);
+      // Сохраняем parsed_data напрямую как VacancyInput
+      setVacancyData(result.parsed_data);
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Произошла ошибка при обработке');

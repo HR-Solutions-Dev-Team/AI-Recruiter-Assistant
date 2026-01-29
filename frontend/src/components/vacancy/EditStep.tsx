@@ -1,351 +1,825 @@
 import { useState } from 'react';
-import { Pencil, X, Check, Plus, Trash2, ArrowRight, GripVertical } from 'lucide-react';
-import type { VacancyData } from '../../pages/VacancyCreate';
+import { ChevronDown, ChevronRight, ArrowRight, Plus, Trash2, Check } from 'lucide-react';
+import type { VacancyInput, Skill, Language, BusinessProcess } from '../../types/vacancy';
 
 interface EditStepProps {
   onNext: () => void;
-  vacancyData: VacancyData;
-  setVacancyData: React.Dispatch<React.SetStateAction<VacancyData>>;
+  vacancyData: VacancyInput;
+  setVacancyData: React.Dispatch<React.SetStateAction<VacancyInput>>;
+  completionPercent: number;
+  setCompletionPercent: React.Dispatch<React.SetStateAction<number>>;
 }
 
-type EditingField = string | null;
+type SectionKey = 'core' | 'company' | 'classification' | 'workConditions' | 'requirements' | 'responsibilities' | 'orgStructure';
 
-interface FieldConfig {
-  key: keyof VacancyData;
-  label: string;
-  type: 'text' | 'textarea' | 'select' | 'list' | 'salary';
-  options?: string[];
-  placeholder?: string;
+interface SectionConfig {
+  key: SectionKey;
+  title: string;
+  description: string;
+  weight: number;
 }
 
-const FIELD_CONFIGS: FieldConfig[] = [
-  { key: 'title', label: 'Название позиции', type: 'text', placeholder: 'Например: Senior Frontend Developer' },
-  { key: 'department', label: 'Отдел', type: 'text', placeholder: 'Например: Engineering' },
-  { key: 'location', label: 'Локация', type: 'text', placeholder: 'Например: Москва' },
-  {
-    key: 'employmentType',
-    label: 'Формат работы',
-    type: 'select',
-    options: ['Полная занятость (офис)', 'Полная занятость (удалённо)', 'Гибрид', 'Частичная занятость'],
-  },
-  {
-    key: 'experienceLevel',
-    label: 'Уровень опыта',
-    type: 'select',
-    options: ['Junior', 'Middle', 'Senior', 'Lead', 'Principal'],
-  },
-  { key: 'salaryFrom', label: 'Заработная плата', type: 'salary' },
-  { key: 'description', label: 'Описание', type: 'textarea', placeholder: 'Краткое описание позиции...' },
-  { key: 'responsibilities', label: 'Обязанности', type: 'list' },
-  { key: 'requirements', label: 'Требования', type: 'list' },
-  { key: 'niceToHave', label: 'Будет плюсом', type: 'list' },
-  { key: 'benefits', label: 'Что мы предлагаем', type: 'list' },
+const SECTIONS: SectionConfig[] = [
+  { key: 'core', title: 'Основная информация', description: 'Название, уровень, отрасль', weight: 25 },
+  { key: 'company', title: 'Компания', description: 'Название, тип, размер, сфера деятельности', weight: 10 },
+  { key: 'classification', title: 'Классификация', description: 'Функция, семейство ролей, бизнес-модель', weight: 5 },
+  { key: 'workConditions', title: 'Условия работы', description: 'Занятость, график, зарплата, локация', weight: 20 },
+  { key: 'requirements', title: 'Требования', description: 'Образование, опыт, навыки, языки', weight: 25 },
+  { key: 'responsibilities', title: 'Обязанности', description: 'Зоны ответственности, процессы', weight: 10 },
+  { key: 'orgStructure', title: 'Оргструктура', description: 'Подчинение, команда, взаимодействия', weight: 5 },
 ];
 
-export default function EditStep({ onNext, vacancyData, setVacancyData }: EditStepProps) {
-  const [editingField, setEditingField] = useState<EditingField>(null);
-  const [tempValue, setTempValue] = useState<string | string[]>('');
-  const [newListItem, setNewListItem] = useState('');
+// Опции для select полей с русскими названиями
+const CAREER_LEVELS: { value: string; label: string }[] = [
+  { value: 'intern', label: 'Стажёр' },
+  { value: 'junior', label: 'Младший специалист (Junior)' },
+  { value: 'middle', label: 'Специалист (Middle)' },
+  { value: 'senior', label: 'Старший специалист (Senior)' },
+  { value: 'lead', label: 'Ведущий специалист (Lead)' },
+  { value: 'head', label: 'Руководитель направления' },
+  { value: 'director', label: 'Директор' },
+  { value: 'c-level', label: 'Топ-менеджмент (C-level)' },
+];
 
-  const startEditing = (field: FieldConfig) => {
-    setEditingField(field.key);
-    setTempValue(vacancyData[field.key] as string | string[]);
+const COMPANY_TYPES: { value: string; label: string }[] = [
+  { value: 'startup', label: 'Стартап' },
+  { value: 'sme', label: 'Малый и средний бизнес' },
+  { value: 'enterprise', label: 'Крупная компания' },
+  { value: 'corporation', label: 'Корпорация' },
+  { value: 'government', label: 'Государственная организация' },
+  { value: 'ngo', label: 'Некоммерческая организация' },
+  { value: 'consulting', label: 'Консалтинг' },
+];
+
+const COMPANY_SIZES = ['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5000+'];
+
+const EMPLOYMENT_TYPES: { value: string; label: string }[] = [
+  { value: 'full-time', label: 'Полная занятость' },
+  { value: 'part-time', label: 'Частичная занятость' },
+  { value: 'contract', label: 'Контракт/Проект' },
+  { value: 'freelance', label: 'Фриланс' },
+  { value: 'internship', label: 'Стажировка' },
+  { value: 'temporary', label: 'Временная работа' },
+];
+
+const SCHEDULE_TYPES: { value: string; label: string }[] = [
+  { value: '5/2', label: '5/2 (пн-пт)' },
+  { value: '2/2', label: '2/2 (сменный)' },
+  { value: 'flexible', label: 'Гибкий график' },
+  { value: 'shift', label: 'Сменный график' },
+  { value: 'remote-async', label: 'Удалённо (асинхронно)' },
+  { value: 'hybrid', label: 'Гибридный' },
+];
+
+const REMOTE_TYPES: { value: string; label: string }[] = [
+  { value: 'office', label: 'В офисе' },
+  { value: 'remote', label: 'Удалённо' },
+  { value: 'hybrid', label: 'Гибрид (офис + удалёнка)' },
+  { value: 'relocate', label: 'С релокацией' },
+];
+
+const CURRENCIES = ['RUB', 'USD', 'EUR', 'GBP', 'KZT', 'BYN'];
+
+const EDUCATION_LEVELS: { value: string; label: string }[] = [
+  { value: 'any', label: 'Любое' },
+  { value: 'secondary', label: 'Среднее' },
+  { value: 'bachelor', label: 'Бакалавриат' },
+  { value: 'master', label: 'Магистратура' },
+  { value: 'phd', label: 'Аспирантура / PhD' },
+  { value: 'mba', label: 'MBA' },
+];
+
+const SKILL_CATEGORIES: { value: string; label: string }[] = [
+  { value: 'hard', label: 'Технические' },
+  { value: 'soft', label: 'Гибкие навыки' },
+  { value: 'management', label: 'Управленческие' },
+  { value: 'digital_tool', label: 'Цифровые инструменты' },
+];
+
+const SKILL_LEVELS: { value: string; label: string }[] = [
+  { value: 'basic', label: 'Базовый' },
+  { value: 'intermediate', label: 'Средний' },
+  { value: 'advanced', label: 'Продвинутый' },
+  { value: 'expert', label: 'Эксперт' },
+];
+
+const LANGUAGE_PROFICIENCIES: { value: string; label: string }[] = [
+  { value: 'A1', label: 'A1 (начальный)' },
+  { value: 'A2', label: 'A2 (элементарный)' },
+  { value: 'B1', label: 'B1 (средний)' },
+  { value: 'B2', label: 'B2 (выше среднего)' },
+  { value: 'C1', label: 'C1 (продвинутый)' },
+  { value: 'C2', label: 'C2 (владение в совершенстве)' },
+  { value: 'native', label: 'Родной' },
+];
+
+const BUSINESS_SEGMENTS: { value: string; label: string }[] = [
+  { value: 'B2B', label: 'B2B (бизнес для бизнеса)' },
+  { value: 'B2C', label: 'B2C (бизнес для потребителя)' },
+  { value: 'B2B2C', label: 'B2B2C (смешанный)' },
+  { value: 'B2G', label: 'B2G (бизнес для государства)' },
+  { value: 'C2C', label: 'C2C (между потребителями)' },
+  { value: 'D2C', label: 'D2C (напрямую потребителю)' },
+];
+
+export default function EditStep({
+  onNext,
+  vacancyData,
+  setVacancyData,
+  completionPercent,
+  setCompletionPercent
+}: EditStepProps) {
+  const [openSection, setOpenSection] = useState<SectionKey>('core');
+
+  const toggleSection = (key: SectionKey) => {
+    setOpenSection(openSection === key ? key : key);
   };
 
-  const cancelEditing = () => {
-    setEditingField(null);
-    setTempValue('');
-    setNewListItem('');
-  };
-
-  const saveField = (key: keyof VacancyData) => {
-    setVacancyData((prev) => ({
+  // Универсальный обновлятор вложенных полей
+  const updateField = <T extends keyof VacancyInput>(
+    section: T,
+    field: string,
+    value: unknown
+  ) => {
+    setVacancyData(prev => ({
       ...prev,
-      [key]: tempValue,
+      [section]: {
+        ...(prev[section] as object || {}),
+        [field]: value,
+      },
     }));
-    setEditingField(null);
-    setTempValue('');
   };
 
-  const addListItem = (key: keyof VacancyData) => {
-    if (newListItem.trim()) {
-      const currentList = tempValue as string[];
-      setTempValue([...currentList, newListItem.trim()]);
-      setNewListItem('');
-    }
+  // Обновление вложенных объектов (уровень 3)
+  const updateNestedField = <T extends keyof VacancyInput>(
+    section: T,
+    parent: string,
+    field: string,
+    value: unknown
+  ) => {
+    setVacancyData(prev => {
+      const sectionData = (prev[section] as Record<string, unknown>) || {};
+      const parentData = (sectionData[parent] as Record<string, unknown>) || {};
+      return {
+        ...prev,
+        [section]: {
+          ...sectionData,
+          [parent]: {
+            ...parentData,
+            [field]: value,
+          },
+        },
+      };
+    });
   };
 
-  const removeListItem = (index: number) => {
-    const currentList = tempValue as string[];
-    setTempValue(currentList.filter((_, i) => i !== index));
+  // Подсчёт заполненности секции
+  const getSectionCompletion = (key: SectionKey): number => {
+    const section = vacancyData[key];
+    if (!section) return 0;
+
+    const values = Object.values(section);
+    const filled = values.filter(v => {
+      if (v === null || v === undefined) return false;
+      if (typeof v === 'string') return v.trim() !== '';
+      if (Array.isArray(v)) return v.length > 0;
+      if (typeof v === 'object') return Object.values(v).some(x => x !== null && x !== undefined);
+      return true;
+    });
+
+    return Math.round((filled.length / Math.max(values.length, 1)) * 100);
   };
 
-  const updateListItem = (index: number, value: string) => {
-    const currentList = [...(tempValue as string[])];
-    currentList[index] = value;
-    setTempValue(currentList);
-  };
+  // Рендер текстового поля
+  const renderTextField = (
+    label: string,
+    value: string | undefined,
+    onChange: (val: string) => void,
+    placeholder?: string
+  ) => (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
+      <input
+        type="text"
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm
+                   focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300"
+      />
+    </div>
+  );
 
-  const renderFieldValue = (field: FieldConfig) => {
-    const value = vacancyData[field.key];
+  // Рендер числового поля
+  const renderNumberField = (
+    label: string,
+    value: number | undefined,
+    onChange: (val: number | undefined) => void,
+    placeholder?: string
+  ) => (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
+      <input
+        type="number"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
+        placeholder={placeholder}
+        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm
+                   focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300"
+      />
+    </div>
+  );
 
-    if (field.type === 'list') {
-      const items = value as string[];
-      if (items.length === 0) {
-        return <span className="text-gray-400 italic">Не указано</span>;
-      }
-      return (
-        <ul className="list-disc list-inside space-y-1">
-          {items.map((item, index) => (
-            <li key={index} className="text-gray-700 text-sm">{item}</li>
-          ))}
-        </ul>
-      );
-    }
+  // Рендер select поля (поддерживает как простые строки, так и {value, label})
+  const renderSelectField = (
+    label: string,
+    value: string | undefined,
+    options: string[] | { value: string; label: string }[],
+    onChange: (val: string) => void,
+    placeholder = 'Выберите...'
+  ) => {
+    const isLabeledOptions = options.length > 0 && typeof options[0] === 'object';
 
-    if (field.type === 'salary') {
-      const from = vacancyData.salaryFrom;
-      const to = vacancyData.salaryTo;
-      if (!from && !to) {
-        return <span className="text-gray-400 italic">Не указано</span>;
-      }
-      return (
-        <span className="text-gray-700">
-          {from && to ? `${Number(from).toLocaleString()} — ${Number(to).toLocaleString()} ${vacancyData.currency}` :
-            from ? `от ${Number(from).toLocaleString()} ${vacancyData.currency}` :
-            `до ${Number(to).toLocaleString()} ${vacancyData.currency}`}
-        </span>
-      );
-    }
-
-    if (!value || (typeof value === 'string' && !value.trim())) {
-      return <span className="text-gray-400 italic">Не указано</span>;
-    }
-
-    return <span className="text-gray-700">{value as string}</span>;
-  };
-
-  const renderEditor = (field: FieldConfig) => {
-    if (field.type === 'text') {
-      return (
-        <input
-          type="text"
-          value={tempValue as string}
-          onChange={(e) => setTempValue(e.target.value)}
-          placeholder={field.placeholder}
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm
-                     focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400"
-          autoFocus
-        />
-      );
-    }
-
-    if (field.type === 'textarea') {
-      return (
-        <textarea
-          value={tempValue as string}
-          onChange={(e) => setTempValue(e.target.value)}
-          placeholder={field.placeholder}
-          rows={4}
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm resize-none
-                     focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400"
-          autoFocus
-        />
-      );
-    }
-
-    if (field.type === 'select') {
-      return (
+    return (
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
         <select
-          value={tempValue as string}
-          onChange={(e) => setTempValue(e.target.value)}
-          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm
-                     focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400
-                     bg-white"
+          value={value || ''}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm bg-white
+                     focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300"
         >
-          <option value="">Выберите...</option>
-          {field.options?.map((option) => (
-            <option key={option} value={option}>{option}</option>
-          ))}
+          <option value="">{placeholder}</option>
+          {isLabeledOptions
+            ? (options as { value: string; label: string }[]).map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))
+            : (options as string[]).map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))
+          }
         </select>
-      );
-    }
+      </div>
+    );
+  };
 
-    if (field.type === 'salary') {
-      const [from, to] = typeof tempValue === 'string'
-        ? [vacancyData.salaryFrom, vacancyData.salaryTo]
-        : [tempValue[0] || '', tempValue[1] || ''];
-
-      return (
-        <div className="space-y-3">
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="text-xs text-gray-500 mb-1 block">От</label>
-              <input
-                type="number"
-                value={from}
-                onChange={(e) => {
-                  setVacancyData(prev => ({ ...prev, salaryFrom: e.target.value }));
-                }}
-                placeholder="100000"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm
-                           focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="text-xs text-gray-500 mb-1 block">До</label>
-              <input
-                type="number"
-                value={to}
-                onChange={(e) => {
-                  setVacancyData(prev => ({ ...prev, salaryTo: e.target.value }));
-                }}
-                placeholder="200000"
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm
-                           focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400"
-              />
-            </div>
-            <div className="w-24">
-              <label className="text-xs text-gray-500 mb-1 block">Валюта</label>
-              <select
-                value={vacancyData.currency}
-                onChange={(e) => setVacancyData(prev => ({ ...prev, currency: e.target.value }))}
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm
-                           focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400 bg-white"
-              >
-                <option value="RUB">RUB</option>
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-              </select>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (field.type === 'list') {
-      const items = tempValue as string[];
-      return (
+  // Рендер списка строк
+  const renderStringList = (
+    label: string,
+    items: string[] | undefined,
+    onChange: (items: string[]) => void
+  ) => {
+    const list = items || [];
+    return (
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
         <div className="space-y-2">
-          {items.map((item, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <GripVertical size={16} className="text-gray-400 flex-shrink-0" />
+          {list.map((item, idx) => (
+            <div key={idx} className="flex gap-2">
               <input
                 type="text"
                 value={item}
-                onChange={(e) => updateListItem(index, e.target.value)}
+                onChange={(e) => {
+                  const newList = [...list];
+                  newList[idx] = e.target.value;
+                  onChange(newList);
+                }}
                 className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-sm
-                           focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300"
+                           focus:outline-none focus:ring-2 focus:ring-gray-900/10"
               />
               <button
-                onClick={() => removeListItem(index)}
-                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg
-                           sidebar-transition"
+                onClick={() => onChange(list.filter((_, i) => i !== idx))}
+                className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
               >
-                <Trash2 size={16} strokeWidth={2} />
+                <Trash2 size={16} />
               </button>
             </div>
           ))}
-          <div className="flex items-center gap-2 mt-3">
+          <button
+            onClick={() => onChange([...list, ''])}
+            className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600
+                       border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+          >
+            <Plus size={16} /> Добавить
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Рендер checkbox
+  const renderCheckbox = (
+    label: string,
+    checked: boolean | undefined,
+    onChange: (val: boolean) => void
+  ) => (
+    <label className="flex items-center gap-3 mb-3 cursor-pointer">
+      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center
+                       ${checked ? 'bg-gray-900 border-gray-900' : 'border-gray-300'}`}>
+        {checked && <Check size={14} className="text-white" />}
+      </div>
+      <input
+        type="checkbox"
+        checked={checked || false}
+        onChange={(e) => onChange(e.target.checked)}
+        className="hidden"
+      />
+      <span className="text-sm text-gray-700">{label}</span>
+    </label>
+  );
+
+  // === СЕКЦИИ ===
+
+  const renderCoreSection = () => (
+    <div className="space-y-4">
+      {renderTextField('Название должности *', vacancyData.core?.jobTitle,
+        (v) => updateField('core', 'jobTitle', v), 'Например: Ведущий разработчик')}
+
+      {renderStringList('Альтернативные названия', vacancyData.core?.synonyms,
+        (v) => updateField('core', 'synonyms', v))}
+
+      <div className="bg-gray-50 rounded-xl p-4 mt-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Уровень позиции</h4>
+        {renderSelectField('Грейд', vacancyData.core?.careerLevel?.code, CAREER_LEVELS,
+          (v) => updateNestedField('core', 'careerLevel', 'code', v))}
+        <div className="grid grid-cols-2 gap-4">
+          {renderNumberField('Опыт от (лет)', vacancyData.core?.careerLevel?.experienceYearsMin,
+            (v) => updateNestedField('core', 'careerLevel', 'experienceYearsMin', v), '1')}
+          {renderNumberField('Опыт до (лет)', vacancyData.core?.careerLevel?.experienceYearsMax,
+            (v) => updateNestedField('core', 'careerLevel', 'experienceYearsMax', v), '5')}
+        </div>
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Отрасль</h4>
+        {renderTextField('Отрасль', vacancyData.core?.industry?.name,
+          (v) => updateNestedField('core', 'industry', 'name', v), 'ИТ, Финтех, Электронная коммерция')}
+        {renderTextField('Подотрасль', vacancyData.core?.industry?.subIndustry,
+          (v) => updateNestedField('core', 'industry', 'subIndustry', v), 'Разработка ПО, Банкинг')}
+      </div>
+    </div>
+  );
+
+  const renderCompanySection = () => (
+    <div className="space-y-4">
+      {renderTextField('Название компании', vacancyData.company?.name,
+        (v) => updateField('company', 'name', v), 'ООО «Компания»')}
+
+      <div className="grid grid-cols-2 gap-4">
+        {renderSelectField('Тип компании', vacancyData.company?.type, COMPANY_TYPES,
+          (v) => updateField('company', 'type', v))}
+        {renderSelectField('Размер (сотрудников)', vacancyData.company?.size, COMPANY_SIZES,
+          (v) => updateField('company', 'size', v))}
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Сфера деятельности</h4>
+        <p className="text-xs text-gray-500 mb-3">
+          Укажите сферу деятельности компании для поиска узкоспециализированных кандидатов
+        </p>
+        {renderTextField('Сфера', vacancyData.company?.activitySphere?.sphere?.name,
+          (v) => updateNestedField('company', 'activitySphere', 'sphere', { name: v }),
+          'Информационные технологии, Общественное питание, Медицина...')}
+        {renderTextField('Подсфера', vacancyData.company?.activitySphere?.subSphere?.name,
+          (v) => updateNestedField('company', 'activitySphere', 'subSphere', { name: v }),
+          'Финансовые технологии, Рестораны, Стоматология...')}
+        {renderTextField('Специализация', vacancyData.company?.activitySphere?.specialization?.name,
+          (v) => updateNestedField('company', 'activitySphere', 'specialization', { name: v }),
+          'Платёжные системы, Кафе, Ортодонтия...')}
+      </div>
+    </div>
+  );
+
+  const renderClassificationSection = () => (
+    <div className="space-y-4">
+      {renderTextField('Бизнес-функция', vacancyData.classification?.businessFunction?.name,
+        (v) => updateNestedField('classification', 'businessFunction', 'name', v), 'ИТ, Финансы, HR, Маркетинг')}
+
+      {renderTextField('Семейство ролей', vacancyData.classification?.roleFamily?.name,
+        (v) => updateNestedField('classification', 'roleFamily', 'name', v), 'Разработка, Управление, Аналитика')}
+
+      {renderTextField('Тип проекта', vacancyData.classification?.projectType,
+        (v) => updateField('classification', 'projectType', v), 'Продукт, аутсорс, стартап, R&D')}
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Бизнес-модель</h4>
+        {renderTextField('Название', vacancyData.classification?.businessModel?.name,
+          (v) => updateNestedField('classification', 'businessModel', 'name', v), 'Подписка, маркетплейс, SaaS')}
+        {renderSelectField('Сегмент', vacancyData.classification?.businessModel?.segment,
+          BUSINESS_SEGMENTS,
+          (v) => updateNestedField('classification', 'businessModel', 'segment', v))}
+      </div>
+    </div>
+  );
+
+  const renderWorkConditionsSection = () => (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        {renderSelectField('Тип занятости', vacancyData.workConditions?.employmentType?.name, EMPLOYMENT_TYPES,
+          (v) => updateNestedField('workConditions', 'employmentType', 'name', v))}
+        {renderSelectField('График', vacancyData.workConditions?.schedule?.name, SCHEDULE_TYPES,
+          (v) => updateNestedField('workConditions', 'schedule', 'name', v))}
+      </div>
+
+      {renderTextField('Часы работы', vacancyData.workConditions?.workHours,
+        (v) => updateField('workConditions', 'workHours', v), '10:00-19:00 по Москве')}
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Зарплата</h4>
+        <div className="grid grid-cols-3 gap-4">
+          {renderNumberField('От', vacancyData.workConditions?.salary?.amountMin,
+            (v) => updateNestedField('workConditions', 'salary', 'amountMin', v), '150000')}
+          {renderNumberField('До', vacancyData.workConditions?.salary?.amountMax,
+            (v) => updateNestedField('workConditions', 'salary', 'amountMax', v), '300000')}
+          {renderSelectField('Валюта', vacancyData.workConditions?.salary?.currency, CURRENCIES,
+            (v) => updateNestedField('workConditions', 'salary', 'currency', v))}
+        </div>
+        {renderTextField('Комментарий', vacancyData.workConditions?.salary?.comment,
+          (v) => updateNestedField('workConditions', 'salary', 'comment', v), 'до вычета налогов, + премии')}
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Локация</h4>
+        <div className="grid grid-cols-2 gap-4">
+          {renderTextField('Город', vacancyData.workConditions?.location?.city,
+            (v) => updateNestedField('workConditions', 'location', 'city', v), 'Москва')}
+          {renderTextField('Страна', vacancyData.workConditions?.location?.country,
+            (v) => updateNestedField('workConditions', 'location', 'country', v), 'Россия')}
+        </div>
+        {renderSelectField('Формат работы', vacancyData.workConditions?.location?.remote, REMOTE_TYPES,
+          (v) => updateNestedField('workConditions', 'location', 'remote', v))}
+        <div className="mt-3">
+          {renderCheckbox('Помощь с релокацией', vacancyData.workConditions?.location?.relocationSupport,
+            (v) => updateNestedField('workConditions', 'location', 'relocationSupport', v))}
+          {renderCheckbox('Визовая поддержка', vacancyData.workConditions?.location?.visaSupport,
+            (v) => updateNestedField('workConditions', 'location', 'visaSupport', v))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderRequirementsSection = () => (
+    <div className="space-y-4">
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Образование</h4>
+        {renderSelectField('Уровень', vacancyData.requirements?.education?.level, EDUCATION_LEVELS,
+          (v) => updateNestedField('requirements', 'education', 'level', v))}
+        {renderStringList('Направления подготовки', vacancyData.requirements?.education?.fields,
+          (v) => updateNestedField('requirements', 'education', 'fields', v))}
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Опыт работы</h4>
+        <div className="grid grid-cols-2 gap-4">
+          {renderNumberField('Лет от', vacancyData.requirements?.experience?.yearsMin,
+            (v) => updateNestedField('requirements', 'experience', 'yearsMin', v), '1')}
+          {renderNumberField('Лет до', vacancyData.requirements?.experience?.yearsMax,
+            (v) => updateNestedField('requirements', 'experience', 'yearsMax', v), '5')}
+        </div>
+        {renderStringList('Отрасли опыта', vacancyData.requirements?.experience?.domains,
+          (v) => updateNestedField('requirements', 'experience', 'domains', v))}
+        {renderStringList('Обязательный опыт', vacancyData.requirements?.experience?.mustHave,
+          (v) => updateNestedField('requirements', 'experience', 'mustHave', v))}
+        {renderStringList('Желательный опыт', vacancyData.requirements?.experience?.niceToHave,
+          (v) => updateNestedField('requirements', 'experience', 'niceToHave', v))}
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Навыки</h4>
+        {renderSkillsList()}
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Языки</h4>
+        {renderLanguagesList()}
+      </div>
+    </div>
+  );
+
+  const renderSkillsList = () => {
+    const skills = vacancyData.requirements?.skills || [];
+    return (
+      <div className="space-y-3">
+        {skills.map((skill, idx) => (
+          <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200">
+            <div className="flex justify-between items-start mb-2">
+              <input
+                type="text"
+                value={skill.name}
+                onChange={(e) => {
+                  const newSkills = [...skills];
+                  newSkills[idx] = { ...skill, name: e.target.value };
+                  updateField('requirements', 'skills', newSkills);
+                }}
+                placeholder="Например: React, Python, Управление командой"
+                className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm mr-2"
+              />
+              <button
+                onClick={() => updateField('requirements', 'skills', skills.filter((_, i) => i !== idx))}
+                className="p-1.5 text-gray-400 hover:text-red-600"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={skill.category}
+                onChange={(e) => {
+                  const newSkills = [...skills];
+                  newSkills[idx] = { ...skill, category: e.target.value as Skill['category'] };
+                  updateField('requirements', 'skills', newSkills);
+                }}
+                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white"
+              >
+                {SKILL_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+              <select
+                value={skill.level || ''}
+                onChange={(e) => {
+                  const newSkills = [...skills];
+                  newSkills[idx] = { ...skill, level: e.target.value as Skill['level'] };
+                  updateField('requirements', 'skills', newSkills);
+                }}
+                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white"
+              >
+                <option value="">Уровень</option>
+                {SKILL_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+              </select>
+              <label className="flex items-center gap-2 text-xs">
+                <input
+                  type="checkbox"
+                  checked={skill.isRequired || false}
+                  onChange={(e) => {
+                    const newSkills = [...skills];
+                    newSkills[idx] = { ...skill, isRequired: e.target.checked };
+                    updateField('requirements', 'skills', newSkills);
+                  }}
+                />
+                Обязательный
+              </label>
+            </div>
+          </div>
+        ))}
+        <button
+          onClick={() => updateField('requirements', 'skills', [...skills, { name: '', category: 'hard', isRequired: true }])}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600
+                     border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+        >
+          <Plus size={16} /> Добавить навык
+        </button>
+      </div>
+    );
+  };
+
+  const renderLanguagesList = () => {
+    const languages = vacancyData.requirements?.languages || [];
+    return (
+      <div className="space-y-3">
+        {languages.map((lang, idx) => (
+          <div key={idx} className="flex gap-2 items-center">
             <input
               type="text"
-              value={newListItem}
-              onChange={(e) => setNewListItem(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addListItem(field.key)}
-              placeholder="Добавить пункт..."
-              className="flex-1 px-4 py-2 border border-dashed border-gray-300 rounded-lg text-sm
-                         focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-400"
+              value={lang.name}
+              onChange={(e) => {
+                const newLangs = [...languages];
+                newLangs[idx] = { ...lang, name: e.target.value };
+                updateField('requirements', 'languages', newLangs);
+              }}
+              placeholder="Русский, Английский..."
+              className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
             />
-            <button
-              onClick={() => addListItem(field.key)}
-              disabled={!newListItem.trim()}
-              className={`
-                p-2 rounded-lg sidebar-transition
-                ${newListItem.trim()
-                  ? 'text-gray-900 hover:bg-gray-100'
-                  : 'text-gray-300 cursor-not-allowed'
-                }
-              `}
+            <select
+              value={lang.proficiency || ''}
+              onChange={(e) => {
+                const newLangs = [...languages];
+                newLangs[idx] = { ...lang, proficiency: e.target.value as Language['proficiency'] };
+                updateField('requirements', 'languages', newLangs);
+              }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
             >
-              <Plus size={18} strokeWidth={2} />
+              <option value="">Уровень</option>
+              {LANGUAGE_PROFICIENCIES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+            <label className="flex items-center gap-2 text-sm whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={lang.isRequired || false}
+                onChange={(e) => {
+                  const newLangs = [...languages];
+                  newLangs[idx] = { ...lang, isRequired: e.target.checked };
+                  updateField('requirements', 'languages', newLangs);
+                }}
+              />
+              Обяз.
+            </label>
+            <button
+              onClick={() => updateField('requirements', 'languages', languages.filter((_, i) => i !== idx))}
+              className="p-2 text-gray-400 hover:text-red-600"
+            >
+              <Trash2 size={16} />
             </button>
           </div>
-        </div>
-      );
-    }
+        ))}
+        <button
+          onClick={() => updateField('requirements', 'languages', [...languages, { name: '', isRequired: false }])}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600
+                     border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+        >
+          <Plus size={16} /> Добавить язык
+        </button>
+      </div>
+    );
+  };
 
-    return null;
+  const renderResponsibilitiesSection = () => (
+    <div className="space-y-4">
+      {renderTextField('Общее описание', vacancyData.responsibilities?.scope,
+        (v) => updateField('responsibilities', 'scope', v), 'Разработка и поддержка веб-приложений компании')}
+
+      {renderStringList('Зоны ответственности', vacancyData.responsibilities?.zones,
+        (v) => updateField('responsibilities', 'zones', v))}
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Бизнес-процессы</h4>
+        {renderBusinessProcesses()}
+      </div>
+    </div>
+  );
+
+  const renderBusinessProcesses = () => {
+    const processes = vacancyData.responsibilities?.businessProcesses || [];
+    return (
+      <div className="space-y-3">
+        {processes.map((proc, idx) => (
+          <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200">
+            <div className="flex gap-2 mb-2">
+              <input
+                type="text"
+                value={proc.name}
+                onChange={(e) => {
+                  const newProcs = [...processes];
+                  newProcs[idx] = { ...proc, name: e.target.value };
+                  updateField('responsibilities', 'businessProcesses', newProcs);
+                }}
+                placeholder="Например: Разработка продукта"
+                className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm"
+              />
+              <button
+                onClick={() => updateField('responsibilities', 'businessProcesses', processes.filter((_, i) => i !== idx))}
+                className="p-1.5 text-gray-400 hover:text-red-600"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="pl-4 space-y-1">
+              {(proc.subprocesses || []).map((sub, subIdx) => (
+                <div key={subIdx} className="flex gap-2">
+                  <span className="text-gray-400">└</span>
+                  <input
+                    type="text"
+                    value={sub.name}
+                    onChange={(e) => {
+                      const newProcs = [...processes];
+                      const newSubs = [...(proc.subprocesses || [])];
+                      newSubs[subIdx] = { name: e.target.value };
+                      newProcs[idx] = { ...proc, subprocesses: newSubs };
+                      updateField('responsibilities', 'businessProcesses', newProcs);
+                    }}
+                    placeholder="Подпроцесс"
+                    className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs"
+                  />
+                  <button
+                    onClick={() => {
+                      const newProcs = [...processes];
+                      newProcs[idx] = {
+                        ...proc,
+                        subprocesses: (proc.subprocesses || []).filter((_, i) => i !== subIdx)
+                      };
+                      updateField('responsibilities', 'businessProcesses', newProcs);
+                    }}
+                    className="p-1 text-gray-400 hover:text-red-600"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => {
+                  const newProcs = [...processes];
+                  newProcs[idx] = {
+                    ...proc,
+                    subprocesses: [...(proc.subprocesses || []), { name: '' }]
+                  };
+                  updateField('responsibilities', 'businessProcesses', newProcs);
+                }}
+                className="text-xs text-gray-500 hover:text-gray-700 ml-4"
+              >
+                + подпроцесс
+              </button>
+            </div>
+          </div>
+        ))}
+        <button
+          onClick={() => updateField('responsibilities', 'businessProcesses', [...processes, { name: '', subprocesses: [] }])}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600
+                     border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+        >
+          <Plus size={16} /> Добавить процесс
+        </button>
+      </div>
+    );
+  };
+
+  const renderOrgStructureSection = () => (
+    <div className="space-y-4">
+      {renderTextField('Кому подчиняется', vacancyData.orgStructure?.reportsTo,
+        (v) => updateField('orgStructure', 'reportsTo', v), 'Техническому директору, Руководителю отдела')}
+
+      {renderNumberField('Количество подчинённых', vacancyData.orgStructure?.subordinatesCount,
+        (v) => updateField('orgStructure', 'subordinatesCount', v), '0')}
+
+      {renderTextField('Отдел/подразделение', vacancyData.orgStructure?.orgUnit,
+        (v) => updateField('orgStructure', 'orgUnit', v), 'Отдел разработки, Команда продукта')}
+
+      {renderStringList('Роли в команде', vacancyData.orgStructure?.teamRoles,
+        (v) => updateField('orgStructure', 'teamRoles', v))}
+
+      {renderStringList('Кросс-функциональные связи', vacancyData.orgStructure?.crossFunctionalLinks,
+        (v) => updateField('orgStructure', 'crossFunctionalLinks', v))}
+    </div>
+  );
+
+  const renderSectionContent = (key: SectionKey) => {
+    switch (key) {
+      case 'core': return renderCoreSection();
+      case 'company': return renderCompanySection();
+      case 'classification': return renderClassificationSection();
+      case 'workConditions': return renderWorkConditionsSection();
+      case 'requirements': return renderRequirementsSection();
+      case 'responsibilities': return renderResponsibilitiesSection();
+      case 'orgStructure': return renderOrgStructureSection();
+      default: return null;
+    }
   };
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* Info */}
-      <p className="text-sm text-gray-500 mb-6">
-        Нажмите на поле, чтобы отредактировать его. После проверки всех данных нажмите «Продолжить».
-      </p>
+      {/* Progress Bar */}
+      <div className="mb-6 bg-white border border-gray-200 rounded-xl p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-gray-700">Заполненность вакансии</span>
+          <span className="text-sm font-semibold text-gray-900">{completionPercent}%</span>
+        </div>
+        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gray-900 rounded-full transition-all duration-300"
+            style={{ width: `${completionPercent}%` }}
+          />
+        </div>
+      </div>
 
-      {/* Fields */}
-      <div className="bg-white border border-gray-200 rounded-2xl divide-y divide-gray-100">
-        {FIELD_CONFIGS.map((field) => (
-          <div key={field.key} className="p-4">
-            {editingField === field.key ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-gray-900">{field.label}</label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={cancelEditing}
-                      className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-100
-                                 rounded-lg sidebar-transition"
-                    >
-                      <X size={16} strokeWidth={2} />
-                    </button>
-                    {field.type !== 'salary' && (
-                      <button
-                        onClick={() => saveField(field.key)}
-                        className="p-1.5 text-white bg-gray-900 hover:bg-gray-800
-                                   rounded-lg sidebar-transition"
-                      >
-                        <Check size={16} strokeWidth={2} />
-                      </button>
-                    )}
+      {/* Accordion Sections */}
+      <div className="space-y-3">
+        {SECTIONS.map((section) => {
+          const isOpen = openSection === section.key;
+          const sectionCompletion = getSectionCompletion(section.key);
+
+          return (
+            <div key={section.key} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <button
+                onClick={() => toggleSection(section.key)}
+                className="w-full px-4 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  {isOpen ? (
+                    <ChevronDown size={20} className="text-gray-400" />
+                  ) : (
+                    <ChevronRight size={20} className="text-gray-400" />
+                  )}
+                  <div className="text-left">
+                    <h3 className="text-sm font-medium text-gray-900">{section.title}</h3>
+                    <p className="text-xs text-gray-500">{section.description}</p>
                   </div>
                 </div>
-                {renderEditor(field)}
-                {field.type === 'salary' && (
-                  <div className="flex justify-end">
-                    <button
-                      onClick={cancelEditing}
-                      className="px-4 py-2 text-sm font-medium text-white bg-gray-900
-                                 hover:bg-gray-800 rounded-lg sidebar-transition"
-                    >
-                      Готово
-                    </button>
+                <div className="flex items-center gap-3">
+                  <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-green-500 rounded-full"
+                      style={{ width: `${sectionCompletion}%` }}
+                    />
                   </div>
-                )}
-              </div>
-            ) : (
-              <button
-                onClick={() => startEditing(field)}
-                className="w-full text-left group"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <label className="text-sm font-medium text-gray-500 group-hover:text-gray-700
-                                      sidebar-transition">
-                      {field.label}
-                    </label>
-                    <div className="mt-1">{renderFieldValue(field)}</div>
-                  </div>
-                  <div className="p-1.5 text-gray-400 group-hover:text-gray-600 group-hover:bg-gray-100
-                                  rounded-lg sidebar-transition ml-4 flex-shrink-0">
-                    <Pencil size={16} strokeWidth={2} />
-                  </div>
+                  <span className="text-xs text-gray-500 w-8">{sectionCompletion}%</span>
                 </div>
               </button>
-            )}
-          </div>
-        ))}
+
+              {isOpen && (
+                <div className="px-4 pb-4 pt-2 border-t border-gray-100">
+                  {renderSectionContent(section.key)}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Action Button */}
@@ -353,7 +827,7 @@ export default function EditStep({ onNext, vacancyData, setVacancyData }: EditSt
         <button
           onClick={onNext}
           className="flex items-center gap-2 px-6 py-3 bg-gray-900 text-white
-                     rounded-xl font-medium text-sm hover:bg-gray-800 sidebar-transition"
+                     rounded-xl font-medium text-sm hover:bg-gray-800 transition-colors"
         >
           Продолжить
           <ArrowRight size={18} strokeWidth={2} />

@@ -133,9 +133,20 @@ export interface Industry {
   subIndustry?: string;
 }
 
-export interface CompanyBenefit {
+/** Элемент иерархии сферы деятельности */
+export interface ActivitySphereItem {
   id?: string;
   name?: string;
+}
+
+/** Сфера деятельности компании (иерархическая структура) */
+export interface ActivitySphere {
+  /** Основная сфера деятельности */
+  sphere?: ActivitySphereItem;
+  /** Подсфера деятельности */
+  subSphere?: ActivitySphereItem;
+  /** Специализация */
+  specialization?: ActivitySphereItem;
 }
 
 export interface CompanyLink {
@@ -267,8 +278,8 @@ export interface VacancyCompany {
   industryId?: string;
   /** Код ОКВЭД */
   okved?: string;
-  /** Бенефиты компании */
-  benefits?: CompanyBenefit[];
+  /** Сфера деятельности компании (иерархическая) */
+  activitySphere?: ActivitySphere;
   /** Публичные ссылки компании */
   publicLinks?: CompanyLink[];
 }

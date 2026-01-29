@@ -16,46 +16,20 @@ const STEPS = [
   { id: 4, title: 'Предпросмотр' },
 ];
 
-export interface VacancyData {
-  title: string;
-  department: string;
-  location: string;
-  employmentType: string;
-  experienceLevel: string;
-  salaryFrom: string;
-  salaryTo: string;
-  currency: string;
-  description: string;
-  responsibilities: string[];
-  requirements: string[];
-  niceToHave: string[];
-  benefits: string[];
-}
-
-const initialVacancyData: VacancyData = {
-  title: '',
-  department: '',
-  location: '',
-  employmentType: '',
-  experienceLevel: '',
-  salaryFrom: '',
-  salaryTo: '',
-  currency: 'RUB',
-  description: '',
-  responsibilities: [],
-  requirements: [],
-  niceToHave: [],
-  benefits: [],
+// Начальное состояние VacancyInput
+const initialVacancyInput: VacancyInput = {
+  core: {
+    jobTitle: '',
+  },
 };
 
 export default function VacancyCreate() {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
-  const [vacancyData, setVacancyData] = useState<VacancyData>(initialVacancyData);
+  const [vacancyData, setVacancyData] = useState<VacancyInput>(initialVacancyInput);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [completionPercent, setCompletionPercent] = useState(0);
-  const [parsedVacancyInput, setParsedVacancyInput] = useState<VacancyInput | null>(null);
 
   const handleNextStep = () => {
     if (currentStep < 4) {
@@ -69,7 +43,7 @@ export default function VacancyCreate() {
     newCompletionPercent: number
   ) => {
     setSessionId(newSessionId);
-    setParsedVacancyInput(parsedData);
+    setVacancyData(parsedData);
     setCompletionPercent(newCompletionPercent);
     setCurrentStep(2);
   };
@@ -140,6 +114,8 @@ export default function VacancyCreate() {
             onNext={handleNextStep}
             vacancyData={vacancyData}
             setVacancyData={setVacancyData}
+            completionPercent={completionPercent}
+            setCompletionPercent={setCompletionPercent}
           />
         )}
         {currentStep === 4 && (
