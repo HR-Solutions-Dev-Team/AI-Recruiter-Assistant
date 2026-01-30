@@ -6,15 +6,15 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-
-logger = logging.getLogger(__name__)
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUserId, Redis
+from app.services.enrichment_service import enrichment_service
 from app.services.file_parser import FileParserError, file_parser_service
 from app.services.session import SessionService, SessionStatus, VacancySession
 from app.services.vacancy_parser import vacancy_parser_service
-from app.services.enrichment_service import enrichment_service, EnrichmentQuestion, EnrichmentOption
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 session_service = SessionService()

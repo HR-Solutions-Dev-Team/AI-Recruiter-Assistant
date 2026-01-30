@@ -179,7 +179,7 @@ class VacancyParserService:
             if hints.get("industry"):
                 hint_parts.append(f"Отрасль: {hints['industry']}")
             if hint_parts:
-                prompt += f"\n\nПодсказки:\n" + "\n".join(hint_parts)
+                prompt += "\n\nПодсказки:\n" + "\n".join(hint_parts)
 
         return prompt
 

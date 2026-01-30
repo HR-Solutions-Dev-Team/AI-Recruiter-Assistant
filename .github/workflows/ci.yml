@@ -78,6 +78,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build Docker image
+    - name: Build Docker images with docker-compose
       run: |
-        docker build -t ai-recruiter-assistant:ci .
+        docker-compose -f docker-compose.yml build
+    
+    - name: Verify docker-compose configuration
+      run: |
+        docker-compose -f docker-compose.yml config
