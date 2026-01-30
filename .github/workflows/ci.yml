@@ -78,10 +78,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build Docker images with docker-compose
+    - name: Build Docker images with docker compose
       run: |
-        docker-compose -f docker-compose.yml build
+        docker compose -f docker-compose.yml build
     
-    - name: Verify docker-compose configuration
+    - name: Verify docker compose configuration
       run: |
-        docker-compose -f docker-compose.yml config
+        docker compose -f docker-compose.yml config
