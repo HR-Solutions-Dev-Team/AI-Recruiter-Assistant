@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Send, Bot, User, SkipForward, ArrowRight, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
-import { getNextQuestion, batchSubmitAnswers, type EnrichmentQuestion, type BatchAnswerItem } from '../../api';
+import { getNextQuestion, batchSubmitAnswers, getSession, type EnrichmentQuestion, type BatchAnswerItem } from '../../api';
 import type { VacancyInput } from '../../types/vacancy';
 
 interface ChatStepProps {
@@ -213,9 +213,10 @@ export default function ChatStep({
   };
 
   const handleFinishEnrichment = async () => {
+    setIsSubmitting(true);
+
     // Если есть несохранённые ответы - отправляем их перед выходом
     if (pendingAnswers.length > 0) {
-      setIsSubmitting(true);
       try {
         const response = await batchSubmitAnswers(sessionId, pendingAnswers);
         setCompletionPercent(response.completion_percent);
@@ -223,9 +224,20 @@ export default function ChatStep({
       } catch (err) {
         // Игнорируем ошибку при выходе
       }
-      setIsSubmitting(false);
     }
 
+    // Получаем актуальные данные сессии и обновляем vacancyData
+    try {
+      const sessionData = await getSession(sessionId);
+      if (sessionData.parsed_data) {
+        setVacancyData(sessionData.parsed_data);
+      }
+      setCompletionPercent(sessionData.completion_percent);
+    } catch (err) {
+      // Продолжаем даже при ошибке - используем текущие данные
+    }
+
+    setIsSubmitting(false);
     addMessage('bot', 'Переходим к редактированию вакансии.');
     setTimeout(() => {
       onNext();

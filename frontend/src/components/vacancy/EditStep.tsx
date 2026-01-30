@@ -1,6 +1,9 @@
-import { useState } from 'react';
-import { ChevronDown, ChevronRight, ArrowRight, Plus, Trash2, Check } from 'lucide-react';
-import type { VacancyInput, Skill, Language, BusinessProcess } from '../../types/vacancy';
+import { useState, useMemo } from 'react';
+import { ChevronDown, ChevronRight, ArrowRight, Plus, Trash2, Check, Sparkles } from 'lucide-react';
+import type {
+  VacancyInput, Skill, Language,
+  OnboardingMilestone, ShortTermKPI, AchievementMarker, AbsoluteRequirement
+} from '../../types/vacancy';
 
 interface EditStepProps {
   onNext: () => void;
@@ -10,23 +13,39 @@ interface EditStepProps {
   setCompletionPercent: React.Dispatch<React.SetStateAction<number>>;
 }
 
-type SectionKey = 'core' | 'company' | 'classification' | 'workConditions' | 'requirements' | 'responsibilities' | 'orgStructure';
+type SectionKey =
+  | 'core'
+  | 'company'
+  | 'workConditions'
+  | 'requirements'
+  | 'responsibilities'
+  // Executive Search
+  | 'hiringContext'
+  | 'successCriteria'
+  | 'differentiators'
+  | 'dealbreakers';
 
 interface SectionConfig {
   key: SectionKey;
   title: string;
   description: string;
-  weight: number;
+  baseWeight: number;
+  isExecutiveSearch?: boolean;
 }
 
+// Базовые веса секций (будут корректироваться динамически)
 const SECTIONS: SectionConfig[] = [
-  { key: 'core', title: 'Основная информация', description: 'Название, уровень, отрасль', weight: 25 },
-  { key: 'company', title: 'Компания', description: 'Название, тип, размер, сфера деятельности', weight: 10 },
-  { key: 'classification', title: 'Классификация', description: 'Функция, семейство ролей, бизнес-модель', weight: 5 },
-  { key: 'workConditions', title: 'Условия работы', description: 'Занятость, график, зарплата, локация', weight: 20 },
-  { key: 'requirements', title: 'Требования', description: 'Образование, опыт, навыки, языки', weight: 25 },
-  { key: 'responsibilities', title: 'Обязанности', description: 'Зоны ответственности, процессы', weight: 10 },
-  { key: 'orgStructure', title: 'Оргструктура', description: 'Подчинение, команда, взаимодействия', weight: 5 },
+  // Базовые блоки (80% ключевой информации)
+  { key: 'core', title: 'Позиция', description: 'Должность, уровень, отрасль', baseWeight: 20 },
+  { key: 'company', title: 'Компания', description: 'Название, тип, сфера', baseWeight: 10 },
+  { key: 'workConditions', title: 'Условия', description: 'Формат, зарплата, локация', baseWeight: 15 },
+  { key: 'requirements', title: 'Требования', description: 'Опыт, навыки, языки', baseWeight: 20 },
+  { key: 'responsibilities', title: 'Обязанности', description: 'Задачи, зоны ответственности', baseWeight: 10 },
+  // Executive Search блоки
+  { key: 'hiringContext', title: 'Контекст найма', description: 'Зачем нужен, какую проблему решает', baseWeight: 10, isExecutiveSearch: true },
+  { key: 'successCriteria', title: 'Критерии успеха', description: 'KPI, milestones, ожидания', baseWeight: 5, isExecutiveSearch: true },
+  { key: 'differentiators', title: 'Идеальный кандидат', description: 'Что отличает лучших', baseWeight: 5, isExecutiveSearch: true },
+  { key: 'dealbreakers', title: 'Критические требования', description: 'Без чего точно нет', baseWeight: 5, isExecutiveSearch: true },
 ];
 
 // Опции для select полей с русскими названиями
@@ -122,6 +141,107 @@ const BUSINESS_SEGMENTS: { value: string; label: string }[] = [
   { value: 'D2C', label: 'D2C (напрямую потребителю)' },
 ];
 
+// === EXECUTIVE SEARCH OPTIONS ===
+
+const TRIGGER_EVENT_TYPES: { value: string; label: string }[] = [
+  { value: 'growth', label: 'Рост бизнеса' },
+  { value: 'replacement', label: 'Замена сотрудника' },
+  { value: 'new_direction', label: 'Новое направление' },
+  { value: 'crisis', label: 'Антикризисное управление' },
+  { value: 'transformation', label: 'Трансформация' },
+  { value: 'm_and_a', label: 'Слияние/поглощение' },
+  { value: 'restructuring', label: 'Реструктуризация' },
+];
+
+const MILESTONE_TIMEFRAMES: { value: string; label: string }[] = [
+  { value: '30_days', label: '30 дней' },
+  { value: '60_days', label: '60 дней' },
+  { value: '90_days', label: '90 дней' },
+];
+
+const ACHIEVEMENT_IMPORTANCE: { value: string; label: string }[] = [
+  { value: 'must_have', label: 'Обязательно' },
+  { value: 'strong_plus', label: 'Сильный плюс' },
+  { value: 'nice_to_have', label: 'Желательно' },
+];
+
+const COMPETITOR_POLICIES: { value: string; label: string }[] = [
+  { value: 'actively_hire', label: 'Активно нанимаем' },
+  { value: 'neutral', label: 'Нейтрально' },
+  { value: 'avoid', label: 'Избегаем' },
+  { value: 'strict_avoid', label: 'Строго нет' },
+];
+
+const COMPANY_STAGES: { value: string; label: string }[] = [
+  { value: 'startup_early', label: 'Ранний стартап' },
+  { value: 'startup_growth', label: 'Растущий стартап' },
+  { value: 'scaleup', label: 'Скейлап' },
+  { value: 'enterprise', label: 'Зрелая компания' },
+  { value: 'turnaround', label: 'Turnaround' },
+  { value: 'm_and_a', label: 'M&A' },
+];
+
+// Функция расчёта динамических весов на основе контекста вакансии
+const calculateDynamicWeights = (vacancy: VacancyInput): Record<SectionKey, number> => {
+  const weights: Record<SectionKey, number> = {
+    core: 20,
+    company: 10,
+    workConditions: 15,
+    requirements: 20,
+    responsibilities: 10,
+    hiringContext: 10,
+    successCriteria: 5,
+    differentiators: 5,
+    dealbreakers: 5,
+  };
+
+  const jobTitle = vacancy.core?.jobTitle?.toLowerCase() || '';
+  const careerLevel = vacancy.core?.careerLevel?.code || '';
+  const remote = vacancy.workConditions?.location?.remote;
+
+  // IT/Tech роли: локация менее важна, навыки важнее
+  const isITRole = /developer|программист|devops|data|analyst|аналитик|engineer|инженер|frontend|backend|fullstack|qa|тестировщик|ml|ai|architect|архитектор/.test(jobTitle);
+  if (isITRole) {
+    weights.workConditions = 10;
+    weights.requirements = 25;
+  }
+
+  // Удалённая работа: локация ещё менее важна
+  if (remote === 'remote') {
+    weights.workConditions = Math.max(weights.workConditions - 5, 5);
+    weights.requirements += 5;
+  }
+
+  // Senior/Lead/Director: Executive Search блоки важнее
+  const isSeniorRole = ['senior', 'lead', 'head', 'director', 'c-level'].includes(careerLevel);
+  if (isSeniorRole) {
+    weights.hiringContext = 15;
+    weights.successCriteria = 10;
+    weights.differentiators = 10;
+    weights.dealbreakers = 10;
+    // Уменьшаем базовые
+    weights.core = 15;
+    weights.company = 5;
+    weights.workConditions = 10;
+  }
+
+  // Sales/Business роли: компания и условия важнее
+  const isSalesRole = /sales|продажи|account|business development|bd|коммерческий/.test(jobTitle);
+  if (isSalesRole) {
+    weights.company = 15;
+    weights.workConditions = 20;
+    weights.requirements = 15;
+  }
+
+  // Нормализуем веса до 100%
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  for (const key of Object.keys(weights) as SectionKey[]) {
+    weights[key] = Math.round((weights[key] / total) * 100);
+  }
+
+  return weights;
+};
+
 export default function EditStep({
   onNext,
   vacancyData,
@@ -129,10 +249,13 @@ export default function EditStep({
   completionPercent,
   setCompletionPercent
 }: EditStepProps) {
-  const [openSection, setOpenSection] = useState<SectionKey>('core');
+  const [openSection, setOpenSection] = useState<SectionKey | null>('core');
+
+  // Динамические веса на основе контекста
+  const dynamicWeights = useMemo(() => calculateDynamicWeights(vacancyData), [vacancyData]);
 
   const toggleSection = (key: SectionKey) => {
-    setOpenSection(openSection === key ? key : key);
+    setOpenSection(openSection === key ? null : key);
   };
 
   // Универсальный обновлятор вложенных полей
@@ -390,25 +513,358 @@ export default function EditStep({
     </div>
   );
 
-  const renderClassificationSection = () => (
+  // === EXECUTIVE SEARCH SECTIONS ===
+
+  const renderHiringContextSection = () => (
     <div className="space-y-4">
-      {renderTextField('Бизнес-функция', vacancyData.classification?.businessFunction?.name,
-        (v) => updateNestedField('classification', 'businessFunction', 'name', v), 'ИТ, Финансы, HR, Маркетинг')}
+      {renderSelectField('Причина открытия вакансии', vacancyData.hiringContext?.triggerEvent?.type,
+        TRIGGER_EVENT_TYPES,
+        (v) => updateNestedField('hiringContext', 'triggerEvent', 'type', v))}
 
-      {renderTextField('Семейство ролей', vacancyData.classification?.roleFamily?.name,
-        (v) => updateNestedField('classification', 'roleFamily', 'name', v), 'Разработка, Управление, Аналитика')}
+      {renderTextArea('Какую бизнес-проблему должен решить?', vacancyData.hiringContext?.businessProblem,
+        (v) => updateField('hiringContext', 'businessProblem', v),
+        'Опишите конкретную проблему, которую решит этот человек')}
 
-      {renderTextField('Тип проекта', vacancyData.classification?.projectType,
-        (v) => updateField('classification', 'projectType', v), 'Продукт, аутсорс, стартап, R&D')}
+      {renderTextArea('Ожидаемый результат от найма', vacancyData.hiringContext?.expectedImpact,
+        (v) => updateField('hiringContext', 'expectedImpact', v),
+        'Что изменится через 6-12 месяцев после выхода на работу?')}
+
+      {renderTextField('Почему срочно?', vacancyData.hiringContext?.urgencyReason,
+        (v) => updateField('hiringContext', 'urgencyReason', v), 'Причина срочности найма')}
+
+      {renderTextArea('Ожидания стейкхолдеров', vacancyData.hiringContext?.stakeholderExpectations,
+        (v) => updateField('hiringContext', 'stakeholderExpectations', v),
+        'Чего ждут ключевые лица от этого найма?')}
+    </div>
+  );
+
+  const renderSuccessCriteriaSection = () => (
+    <div className="space-y-4">
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Milestones первых 90 дней</h4>
+        {renderMilestonesList()}
+      </div>
 
       <div className="bg-gray-50 rounded-xl p-4">
-        <h4 className="text-sm font-medium text-gray-900 mb-3">Бизнес-модель</h4>
-        {renderTextField('Название', vacancyData.classification?.businessModel?.name,
-          (v) => updateNestedField('classification', 'businessModel', 'name', v), 'Подписка, маркетплейс, SaaS')}
-        {renderSelectField('Сегмент', vacancyData.classification?.businessModel?.segment,
-          BUSINESS_SEGMENTS,
-          (v) => updateNestedField('classification', 'businessModel', 'segment', v))}
+        <h4 className="text-sm font-medium text-gray-900 mb-3">KPI на 6 месяцев</h4>
+        {renderKPIsList()}
       </div>
+
+      {renderStringList('Стратегические цели (1+ год)', vacancyData.successCriteria?.longTermGoals,
+        (v) => updateField('successCriteria', 'longTermGoals', v))}
+
+      {renderTextArea('Качественные ожидания', vacancyData.successCriteria?.qualitativeExpectations,
+        (v) => updateField('successCriteria', 'qualitativeExpectations', v),
+        'Что сложно измерить, но важно для успеха?')}
+    </div>
+  );
+
+  const renderDifferentiatorsSection = () => (
+    <div className="space-y-4">
+      {renderStringList('Знание доменов/областей', vacancyData.differentiators?.domainKnowledge,
+        (v) => updateField('differentiators', 'domainKnowledge', v))}
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Опыт с масштабом</h4>
+        {renderTextField('Размер команды (мин.)', vacancyData.differentiators?.scaleExperience?.teamSize?.description,
+          (v) => {
+            const current = vacancyData.differentiators?.scaleExperience || {};
+            updateNestedField('differentiators', 'scaleExperience', 'teamSize', { ...current.teamSize, description: v });
+          }, '10+ человек, 50+ человек')}
+        {renderTextField('Бюджет в управлении', vacancyData.differentiators?.scaleExperience?.budget?.min,
+          (v) => {
+            const current = vacancyData.differentiators?.scaleExperience || {};
+            updateNestedField('differentiators', 'scaleExperience', 'budget', { ...current.budget, min: v });
+          }, '$1M+, 100M руб+')}
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Ключевые достижения</h4>
+        {renderAchievementsList()}
+      </div>
+
+      {renderTextField('Ценность нетворка', vacancyData.differentiators?.networkValue,
+        (v) => updateField('differentiators', 'networkValue', v),
+        'Какие связи важны? Клиенты, партнёры, эксперты...')}
+
+      {renderStringList('Предпочтительные компании в бэкграунде', vacancyData.differentiators?.companyBackground?.preferred,
+        (v) => updateNestedField('differentiators', 'companyBackground', 'preferred', v))}
+    </div>
+  );
+
+  const renderDealbrakersSection = () => (
+    <div className="space-y-4">
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Абсолютные требования</h4>
+        {renderAbsoluteRequirementsList()}
+      </div>
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Минимальный опыт</h4>
+        <div className="grid grid-cols-3 gap-4">
+          {renderNumberField('Всего лет', vacancyData.dealbreakers?.experienceMinimums?.totalYears,
+            (v) => updateNestedField('dealbreakers', 'experienceMinimums', 'totalYears', v), '5')}
+          {renderNumberField('В домене', vacancyData.dealbreakers?.experienceMinimums?.domainYears,
+            (v) => updateNestedField('dealbreakers', 'experienceMinimums', 'domainYears', v), '3')}
+          {renderNumberField('Руководство', vacancyData.dealbreakers?.experienceMinimums?.leadershipYears,
+            (v) => updateNestedField('dealbreakers', 'experienceMinimums', 'leadershipYears', v), '2')}
+        </div>
+      </div>
+
+      {renderStringList('Red flags (что точно НЕ подходит)', vacancyData.dealbreakers?.redFlags,
+        (v) => updateField('dealbreakers', 'redFlags', v))}
+
+      <div className="bg-gray-50 rounded-xl p-4">
+        <h4 className="text-sm font-medium text-gray-900 mb-3">Политика по конкурентам</h4>
+        {renderSelectField('Отношение к кандидатам из конкурентов', vacancyData.dealbreakers?.competitorPolicy?.policy,
+          COMPETITOR_POLICIES,
+          (v) => updateNestedField('dealbreakers', 'competitorPolicy', 'policy', v))}
+        {renderStringList('Компании-конкуренты', vacancyData.dealbreakers?.competitorPolicy?.companies,
+          (v) => updateNestedField('dealbreakers', 'competitorPolicy', 'companies', v))}
+      </div>
+
+      {renderStringList('Требования, которые не обсуждаются', vacancyData.dealbreakers?.nonNegotiables,
+        (v) => updateField('dealbreakers', 'nonNegotiables', v))}
+    </div>
+  );
+
+  // === СПИСКИ ДЛЯ EXECUTIVE SEARCH ===
+
+  const renderMilestonesList = () => {
+    const milestones = vacancyData.successCriteria?.onboardingMilestones || [];
+    return (
+      <div className="space-y-3">
+        {milestones.map((item, idx) => (
+          <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200">
+            <div className="flex justify-between items-start mb-2">
+              <input
+                type="text"
+                value={item.milestone || ''}
+                onChange={(e) => {
+                  const newList = [...milestones];
+                  newList[idx] = { ...item, milestone: e.target.value };
+                  updateField('successCriteria', 'onboardingMilestones', newList);
+                }}
+                placeholder="Что должно быть достигнуто"
+                className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm mr-2"
+              />
+              <button
+                onClick={() => updateField('successCriteria', 'onboardingMilestones', milestones.filter((_, i) => i !== idx))}
+                className="p-1.5 text-gray-400 hover:text-red-600"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={item.timeframe || ''}
+                onChange={(e) => {
+                  const newList = [...milestones];
+                  newList[idx] = { ...item, timeframe: e.target.value as OnboardingMilestone['timeframe'] };
+                  updateField('successCriteria', 'onboardingMilestones', newList);
+                }}
+                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white"
+              >
+                <option value="">Срок</option>
+                {MILESTONE_TIMEFRAMES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+              <input
+                type="text"
+                value={item.measureOfSuccess || ''}
+                onChange={(e) => {
+                  const newList = [...milestones];
+                  newList[idx] = { ...item, measureOfSuccess: e.target.value };
+                  updateField('successCriteria', 'onboardingMilestones', newList);
+                }}
+                placeholder="Как измерить успех"
+                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs"
+              />
+            </div>
+          </div>
+        ))}
+        <button
+          onClick={() => updateField('successCriteria', 'onboardingMilestones', [...milestones, { milestone: '', timeframe: '30_days' }])}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+        >
+          <Plus size={16} /> Добавить milestone
+        </button>
+      </div>
+    );
+  };
+
+  const renderKPIsList = () => {
+    const kpis = vacancyData.successCriteria?.shortTermKPIs || [];
+    return (
+      <div className="space-y-3">
+        {kpis.map((item, idx) => (
+          <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200">
+            <div className="flex justify-between items-start mb-2">
+              <input
+                type="text"
+                value={item.metric || ''}
+                onChange={(e) => {
+                  const newList = [...kpis];
+                  newList[idx] = { ...item, metric: e.target.value };
+                  updateField('successCriteria', 'shortTermKPIs', newList);
+                }}
+                placeholder="Метрика (NPS, Revenue, Retention...)"
+                className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm mr-2"
+              />
+              <button
+                onClick={() => updateField('successCriteria', 'shortTermKPIs', kpis.filter((_, i) => i !== idx))}
+                className="p-1.5 text-gray-400 hover:text-red-600"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={item.currentValue || ''}
+                onChange={(e) => {
+                  const newList = [...kpis];
+                  newList[idx] = { ...item, currentValue: e.target.value };
+                  updateField('successCriteria', 'shortTermKPIs', newList);
+                }}
+                placeholder="Текущее значение"
+                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs"
+              />
+              <input
+                type="text"
+                value={item.targetValue || ''}
+                onChange={(e) => {
+                  const newList = [...kpis];
+                  newList[idx] = { ...item, targetValue: e.target.value };
+                  updateField('successCriteria', 'shortTermKPIs', newList);
+                }}
+                placeholder="Целевое значение"
+                className="px-2 py-1.5 border border-gray-200 rounded-lg text-xs"
+              />
+            </div>
+          </div>
+        ))}
+        <button
+          onClick={() => updateField('successCriteria', 'shortTermKPIs', [...kpis, { metric: '' }])}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+        >
+          <Plus size={16} /> Добавить KPI
+        </button>
+      </div>
+    );
+  };
+
+  const renderAchievementsList = () => {
+    const achievements = vacancyData.differentiators?.achievementMarkers || [];
+    return (
+      <div className="space-y-3">
+        {achievements.map((item, idx) => (
+          <div key={idx} className="flex gap-2 items-center">
+            <input
+              type="text"
+              value={item.achievement || ''}
+              onChange={(e) => {
+                const newList = [...achievements];
+                newList[idx] = { ...item, achievement: e.target.value };
+                updateField('differentiators', 'achievementMarkers', newList);
+              }}
+              placeholder="Построил команду с 0, вывел продукт на рынок..."
+              className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm"
+            />
+            <select
+              value={item.importance || ''}
+              onChange={(e) => {
+                const newList = [...achievements];
+                newList[idx] = { ...item, importance: e.target.value as AchievementMarker['importance'] };
+                updateField('differentiators', 'achievementMarkers', newList);
+              }}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
+            >
+              <option value="">Важность</option>
+              {ACHIEVEMENT_IMPORTANCE.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
+            </select>
+            <button
+              onClick={() => updateField('differentiators', 'achievementMarkers', achievements.filter((_, i) => i !== idx))}
+              className="p-2 text-gray-400 hover:text-red-600"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={() => updateField('differentiators', 'achievementMarkers', [...achievements, { achievement: '' }])}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+        >
+          <Plus size={16} /> Добавить достижение
+        </button>
+      </div>
+    );
+  };
+
+  const renderAbsoluteRequirementsList = () => {
+    const requirements = vacancyData.dealbreakers?.absoluteRequirements || [];
+    return (
+      <div className="space-y-3">
+        {requirements.map((item, idx) => (
+          <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200">
+            <div className="flex justify-between items-start mb-2">
+              <input
+                type="text"
+                value={item.requirement || ''}
+                onChange={(e) => {
+                  const newList = [...requirements];
+                  newList[idx] = { ...item, requirement: e.target.value };
+                  updateField('dealbreakers', 'absoluteRequirements', newList);
+                }}
+                placeholder="Требование без исключений"
+                className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm mr-2"
+              />
+              <button
+                onClick={() => updateField('dealbreakers', 'absoluteRequirements', requirements.filter((_, i) => i !== idx))}
+                className="p-1.5 text-gray-400 hover:text-red-600"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+            <input
+              type="text"
+              value={item.reason || ''}
+              onChange={(e) => {
+                const newList = [...requirements];
+                newList[idx] = { ...item, reason: e.target.value };
+                updateField('dealbreakers', 'absoluteRequirements', newList);
+              }}
+              placeholder="Почему это критично?"
+              className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs"
+            />
+          </div>
+        ))}
+        <button
+          onClick={() => updateField('dealbreakers', 'absoluteRequirements', [...requirements, { requirement: '' }])}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
+        >
+          <Plus size={16} /> Добавить требование
+        </button>
+      </div>
+    );
+  };
+
+  // Рендер textarea
+  const renderTextArea = (
+    label: string,
+    value: string | undefined,
+    onChange: (val: string) => void,
+    placeholder?: string
+  ) => (
+    <div className="mb-4">
+      <label className="block text-sm font-medium text-gray-700 mb-1.5">{label}</label>
+      <textarea
+        value={value || ''}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={3}
+        className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-sm
+                   focus:outline-none focus:ring-2 focus:ring-gray-900/10 focus:border-gray-300 resize-none"
+      />
     </div>
   );
 
@@ -633,119 +1089,20 @@ export default function EditStep({
 
   const renderResponsibilitiesSection = () => (
     <div className="space-y-4">
-      {renderTextField('Общее описание', vacancyData.responsibilities?.scope,
-        (v) => updateField('responsibilities', 'scope', v), 'Разработка и поддержка веб-приложений компании')}
+      {renderTextArea('Общее описание роли', vacancyData.responsibilities?.scope,
+        (v) => updateField('responsibilities', 'scope', v), 'Кратко опишите ключевую миссию роли')}
 
-      {renderStringList('Зоны ответственности', vacancyData.responsibilities?.zones,
+      {renderStringList('Ключевые зоны ответственности', vacancyData.responsibilities?.zones,
         (v) => updateField('responsibilities', 'zones', v))}
 
-      <div className="bg-gray-50 rounded-xl p-4">
-        <h4 className="text-sm font-medium text-gray-900 mb-3">Бизнес-процессы</h4>
-        {renderBusinessProcesses()}
-      </div>
-    </div>
-  );
-
-  const renderBusinessProcesses = () => {
-    const processes = vacancyData.responsibilities?.businessProcesses || [];
-    return (
-      <div className="space-y-3">
-        {processes.map((proc, idx) => (
-          <div key={idx} className="bg-white rounded-lg p-3 border border-gray-200">
-            <div className="flex gap-2 mb-2">
-              <input
-                type="text"
-                value={proc.name}
-                onChange={(e) => {
-                  const newProcs = [...processes];
-                  newProcs[idx] = { ...proc, name: e.target.value };
-                  updateField('responsibilities', 'businessProcesses', newProcs);
-                }}
-                placeholder="Например: Разработка продукта"
-                className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-sm"
-              />
-              <button
-                onClick={() => updateField('responsibilities', 'businessProcesses', processes.filter((_, i) => i !== idx))}
-                className="p-1.5 text-gray-400 hover:text-red-600"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-            <div className="pl-4 space-y-1">
-              {(proc.subprocesses || []).map((sub, subIdx) => (
-                <div key={subIdx} className="flex gap-2">
-                  <span className="text-gray-400">└</span>
-                  <input
-                    type="text"
-                    value={sub.name}
-                    onChange={(e) => {
-                      const newProcs = [...processes];
-                      const newSubs = [...(proc.subprocesses || [])];
-                      newSubs[subIdx] = { name: e.target.value };
-                      newProcs[idx] = { ...proc, subprocesses: newSubs };
-                      updateField('responsibilities', 'businessProcesses', newProcs);
-                    }}
-                    placeholder="Подпроцесс"
-                    className="flex-1 px-2 py-1 border border-gray-200 rounded text-xs"
-                  />
-                  <button
-                    onClick={() => {
-                      const newProcs = [...processes];
-                      newProcs[idx] = {
-                        ...proc,
-                        subprocesses: (proc.subprocesses || []).filter((_, i) => i !== subIdx)
-                      };
-                      updateField('responsibilities', 'businessProcesses', newProcs);
-                    }}
-                    className="p-1 text-gray-400 hover:text-red-600"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-              <button
-                onClick={() => {
-                  const newProcs = [...processes];
-                  newProcs[idx] = {
-                    ...proc,
-                    subprocesses: [...(proc.subprocesses || []), { name: '' }]
-                  };
-                  updateField('responsibilities', 'businessProcesses', newProcs);
-                }}
-                className="text-xs text-gray-500 hover:text-gray-700 ml-4"
-              >
-                + подпроцесс
-              </button>
-            </div>
-          </div>
-        ))}
-        <button
-          onClick={() => updateField('responsibilities', 'businessProcesses', [...processes, { name: '', subprocesses: [] }])}
-          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600
-                     border border-dashed border-gray-300 rounded-lg hover:bg-gray-50 w-full"
-        >
-          <Plus size={16} /> Добавить процесс
-        </button>
-      </div>
-    );
-  };
-
-  const renderOrgStructureSection = () => (
-    <div className="space-y-4">
       {renderTextField('Кому подчиняется', vacancyData.orgStructure?.reportsTo,
-        (v) => updateField('orgStructure', 'reportsTo', v), 'Техническому директору, Руководителю отдела')}
+        (v) => updateField('orgStructure', 'reportsTo', v), 'CTO, VP Engineering, Руководитель отдела')}
 
       {renderNumberField('Количество подчинённых', vacancyData.orgStructure?.subordinatesCount,
         (v) => updateField('orgStructure', 'subordinatesCount', v), '0')}
 
-      {renderTextField('Отдел/подразделение', vacancyData.orgStructure?.orgUnit,
-        (v) => updateField('orgStructure', 'orgUnit', v), 'Отдел разработки, Команда продукта')}
-
-      {renderStringList('Роли в команде', vacancyData.orgStructure?.teamRoles,
-        (v) => updateField('orgStructure', 'teamRoles', v))}
-
-      {renderStringList('Кросс-функциональные связи', vacancyData.orgStructure?.crossFunctionalLinks,
-        (v) => updateField('orgStructure', 'crossFunctionalLinks', v))}
+      {renderStringList('Процессы в управлении', vacancyData.responsibilities?.processOwnership,
+        (v) => updateField('responsibilities', 'processOwnership', v))}
     </div>
   );
 
@@ -753,13 +1110,80 @@ export default function EditStep({
     switch (key) {
       case 'core': return renderCoreSection();
       case 'company': return renderCompanySection();
-      case 'classification': return renderClassificationSection();
       case 'workConditions': return renderWorkConditionsSection();
       case 'requirements': return renderRequirementsSection();
       case 'responsibilities': return renderResponsibilitiesSection();
-      case 'orgStructure': return renderOrgStructureSection();
+      // Executive Search
+      case 'hiringContext': return renderHiringContextSection();
+      case 'successCriteria': return renderSuccessCriteriaSection();
+      case 'differentiators': return renderDifferentiatorsSection();
+      case 'dealbreakers': return renderDealbrakersSection();
       default: return null;
     }
+  };
+
+  // Разделяем секции на базовые и Executive Search
+  const baseSections = SECTIONS.filter(s => !s.isExecutiveSearch);
+  const execSections = SECTIONS.filter(s => s.isExecutiveSearch);
+
+  const renderSectionItem = (section: SectionConfig) => {
+    const isOpen = openSection === section.key;
+    const sectionCompletion = getSectionCompletion(section.key);
+    const weight = dynamicWeights[section.key];
+
+    return (
+      <div
+        key={section.key}
+        className={`bg-white border rounded-xl overflow-hidden ${
+          section.isExecutiveSearch ? 'border-amber-200' : 'border-gray-200'
+        }`}
+      >
+        <button
+          onClick={() => toggleSection(section.key)}
+          className={`w-full px-4 py-4 flex items-center justify-between transition-colors ${
+            section.isExecutiveSearch ? 'hover:bg-amber-50' : 'hover:bg-gray-50'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            {isOpen ? (
+              <ChevronDown size={20} className="text-gray-400" />
+            ) : (
+              <ChevronRight size={20} className="text-gray-400" />
+            )}
+            <div className="text-left">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-medium text-gray-900">{section.title}</h3>
+                {section.isExecutiveSearch && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-medium bg-amber-100 text-amber-700 rounded">
+                    Executive
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500">{section.description}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right mr-2">
+              <span className="text-[10px] text-gray-400">вес</span>
+              <span className="block text-xs font-medium text-gray-600">{weight}%</span>
+            </div>
+            <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full ${section.isExecutiveSearch ? 'bg-amber-500' : 'bg-green-500'}`}
+                style={{ width: `${sectionCompletion}%` }}
+              />
+            </div>
+            <span className="text-xs text-gray-500 w-8">{sectionCompletion}%</span>
+          </div>
+        </button>
+
+        {isOpen && (
+          <div className={`px-4 pb-4 pt-2 border-t ${section.isExecutiveSearch ? 'border-amber-100 bg-amber-50/30' : 'border-gray-100'}`}>
+            {renderSectionContent(section.key)}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -778,48 +1202,24 @@ export default function EditStep({
         </div>
       </div>
 
-      {/* Accordion Sections */}
+      {/* Base Sections */}
       <div className="space-y-3">
-        {SECTIONS.map((section) => {
-          const isOpen = openSection === section.key;
-          const sectionCompletion = getSectionCompletion(section.key);
+        {baseSections.map(renderSectionItem)}
+      </div>
 
-          return (
-            <div key={section.key} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-              <button
-                onClick={() => toggleSection(section.key)}
-                className="w-full px-4 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  {isOpen ? (
-                    <ChevronDown size={20} className="text-gray-400" />
-                  ) : (
-                    <ChevronRight size={20} className="text-gray-400" />
-                  )}
-                  <div className="text-left">
-                    <h3 className="text-sm font-medium text-gray-900">{section.title}</h3>
-                    <p className="text-xs text-gray-500">{section.description}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-green-500 rounded-full"
-                      style={{ width: `${sectionCompletion}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-500 w-8">{sectionCompletion}%</span>
-                </div>
-              </button>
+      {/* Executive Search Divider */}
+      <div className="my-6 flex items-center gap-3">
+        <div className="flex-1 h-px bg-amber-200" />
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 rounded-full">
+          <Sparkles size={14} className="text-amber-600" />
+          <span className="text-xs font-medium text-amber-700">Executive Search</span>
+        </div>
+        <div className="flex-1 h-px bg-amber-200" />
+      </div>
 
-              {isOpen && (
-                <div className="px-4 pb-4 pt-2 border-t border-gray-100">
-                  {renderSectionContent(section.key)}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      {/* Executive Search Sections */}
+      <div className="space-y-3">
+        {execSections.map(renderSectionItem)}
       </div>
 
       {/* Action Button */}
