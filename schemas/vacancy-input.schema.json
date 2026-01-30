@@ -335,7 +335,7 @@
         },
         "experience": {
           "type": "object",
-          "description": "Требования к опыту",
+          "description": "Требования к опыту. Расширенный блок для executive search с индикаторами масштаба.",
           "properties": {
             "yearsMin": { "type": "integer", "minimum": 0 },
             "yearsMax": { "type": "integer", "minimum": 0 },
@@ -355,6 +355,44 @@
               "type": "array",
               "items": { "type": "string" },
               "description": "Желательный опыт"
+            },
+            "scaleIndicators": {
+              "type": "object",
+              "description": "Индикаторы масштаба опыта (критично для executive search)",
+              "properties": {
+                "teamManagement": {
+                  "type": "object",
+                  "properties": {
+                    "directReports": { "type": "string", "description": "Прямые подчинённые" },
+                    "totalTeam": { "type": "string", "description": "Общий размер команды/организации" }
+                  }
+                },
+                "budgetManagement": { "type": "string", "description": "Бюджет в управлении" },
+                "projectScale": { "type": "string", "description": "Масштаб проектов (users, transactions, data volume)" },
+                "businessImpact": { "type": "string", "description": "Влияние на бизнес-результаты" }
+              },
+              "examples": [
+                {"teamManagement": {"directReports": "5-10", "totalTeam": "30+"}, "budgetManagement": "$1M+/год", "projectScale": "10M+ MAU", "businessImpact": "Ответственность за P&L $10M+"}
+              ]
+            },
+            "contextualExperience": {
+              "type": "object",
+              "description": "Контекстный опыт: типы ситуаций, в которых работал кандидат",
+              "properties": {
+                "companyStages": {
+                  "type": "array",
+                  "items": { "type": "string", "enum": ["startup_early", "startup_growth", "scaleup", "enterprise", "turnaround", "m_and_a"] },
+                  "description": "Стадии компаний"
+                },
+                "situations": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Типы ситуаций/челленджей"
+                }
+              },
+              "examples": [
+                {"companyStages": ["startup_growth", "scaleup"], "situations": ["Построение команды с нуля", "Масштабирование в 10x", "Кризисный менеджмент", "M&A интеграция"]}
+              ]
             }
           }
         },
@@ -434,7 +472,7 @@
 
     "responsibilities": {
       "title": "Обязанности и зоны ответственности",
-      "description": "Что предстоит делать на позиции",
+      "description": "Что предстоит делать на позиции. Расширенный блок для executive search.",
       "type": "object",
       "properties": {
         "scope": {
@@ -450,6 +488,51 @@
             "Code review и менторство команды",
             "Взаимодействие с Data Science командой"
           ]]
+        },
+        "criticalTasks": {
+          "type": "array",
+          "description": "Критические задачи первых 90 дней. Что человек ДОЛЖЕН сделать в первую очередь.",
+          "items": {
+            "type": "object",
+            "required": ["task"],
+            "properties": {
+              "task": { "type": "string", "description": "Описание задачи" },
+              "deadline": { "type": "string", "description": "Срок (30/60/90 дней)" },
+              "successIndicator": { "type": "string", "description": "Как понять, что задача выполнена" }
+            }
+          },
+          "examples": [[
+            {"task": "Провести аудит текущей data-инфраструктуры", "deadline": "30 дней", "successIndicator": "Документ с findings и roadmap"},
+            {"task": "Стабилизировать критические pipelines", "deadline": "60 дней", "successIndicator": "SLA 99.5% uptime"},
+            {"task": "Сформировать и нанять команду", "deadline": "90 дней", "successIndicator": "3 инженера в команде"}
+          ]]
+        },
+        "processOwnership": {
+          "type": "array",
+          "description": "Процессы, которыми будет владеть (end-to-end ответственность)",
+          "items": { "type": "string" },
+          "examples": [["Data Pipeline Development", "Data Quality Management", "Team Performance"]]
+        },
+        "decisionAuthority": {
+          "type": "object",
+          "description": "Уровень полномочий в принятии решений",
+          "properties": {
+            "technical": {
+              "type": "string",
+              "enum": ["advisory", "influence", "approval", "final"],
+              "description": "Технические решения"
+            },
+            "hiring": {
+              "type": "string",
+              "enum": ["none", "recommend", "approve", "final"],
+              "description": "Решения по найму"
+            },
+            "budget": {
+              "type": "string",
+              "enum": ["none", "propose", "manage", "approve"],
+              "description": "Бюджетные решения"
+            }
+          }
         },
         "competencyModel": {
           "type": "string",
@@ -493,6 +576,419 @@
                 {"name": "Architecture Design"}
               ]
             }
+          ]]
+        }
+      }
+    },
+
+    "hiringContext": {
+      "title": "Контекст найма (Executive Search)",
+      "description": "КРИТИЧЕСКИЙ БЛОК для executive search. Определяет ЗАЧЕМ нужен этот человек, а не просто КТО нужен.",
+      "type": "object",
+      "properties": {
+        "triggerEvent": {
+          "type": "object",
+          "description": "Что послужило причиной открытия вакансии",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["growth", "replacement", "new_direction", "crisis", "transformation", "m_and_a", "restructuring"],
+              "description": "Тип события"
+            },
+            "description": { "type": "string", "description": "Подробное описание ситуации" }
+          },
+          "examples": [
+            {"type": "growth", "description": "Компания выросла в 3 раза за год, текущая инфраструктура не справляется"},
+            {"type": "new_direction", "description": "Запускаем направление AI/ML, нужен человек, который построит его с нуля"},
+            {"type": "replacement", "description": "Текущий руководитель уходит через 3 месяца, нужна замена с передачей дел"}
+          ]
+        },
+        "businessProblem": {
+          "type": "string",
+          "description": "Какую бизнес-проблему должен решить этот человек? Конкретно и измеримо.",
+          "examples": [
+            "Текущий data pipeline падает 3 раза в неделю, теряем $50K на каждом инциденте",
+            "Нет единого источника правды по данным, каждый отдел считает метрики по-своему",
+            "Команда выгорает, turnover 40%, нужен лидер который стабилизирует ситуацию"
+          ]
+        },
+        "expectedImpact": {
+          "type": "string",
+          "description": "Какой конкретный результат ожидается от найма этого человека?",
+          "examples": [
+            "Снизить количество инцидентов с 12 до 2 в месяц",
+            "Построить data platform, которая обслужит рост в 10x",
+            "Сформировать команду из 5 человек и выйти на delivery velocity 20 story points/sprint"
+          ]
+        },
+        "urgencyReason": {
+          "type": "string",
+          "description": "Почему срочно? Что происходит, если не найдём в ближайшее время?",
+          "examples": [
+            "Q2 запуск нового продукта, без этого человека не успеем",
+            "Текущий лид уходит через 2 месяца, нужен overlap для передачи",
+            "Регулятор требует compliance до конца года"
+          ]
+        },
+        "previousAttempts": {
+          "type": "object",
+          "description": "Были ли попытки закрыть эту позицию раньше?",
+          "properties": {
+            "hadAttempts": { "type": "boolean" },
+            "duration": { "type": "string", "description": "Сколько времени искали" },
+            "candidatesSeen": { "type": "integer", "description": "Сколько кандидатов посмотрели" },
+            "whyFailed": { "type": "string", "description": "Почему не получилось закрыть" }
+          },
+          "examples": [
+            {"hadAttempts": true, "duration": "6 месяцев", "candidatesSeen": 50, "whyFailed": "Кандидаты не проходили техническое интервью - слабый опыт с high-load"},
+            {"hadAttempts": true, "duration": "3 месяца", "candidatesSeen": 20, "whyFailed": "Делали оффер 3 людям, все отказались - зарплата ниже рынка"}
+          ]
+        },
+        "stakeholderExpectations": {
+          "type": "string",
+          "description": "Что ожидают ключевые стейкхолдеры (CEO, CTO, Board)?",
+          "examples": [
+            "CEO ожидает, что человек возьмёт на себя всю data-функцию и выведет её на уровень best-in-class",
+            "CTO хочет партнёра, который разгрузит его от операционки и позволит сфокусироваться на стратегии"
+          ]
+        }
+      }
+    },
+
+    "successCriteria": {
+      "title": "Критерии успеха и KPI",
+      "description": "Измеримые критерии, по которым оценим успех найма. Критично для executive search.",
+      "type": "object",
+      "properties": {
+        "onboardingMilestones": {
+          "type": "array",
+          "description": "Конкретные milestones первых 90 дней",
+          "items": {
+            "type": "object",
+            "properties": {
+              "milestone": { "type": "string" },
+              "timeframe": { "type": "string", "enum": ["30_days", "60_days", "90_days"] },
+              "measureOfSuccess": { "type": "string" }
+            }
+          },
+          "examples": [[
+            {"milestone": "Завершить аудит текущей системы", "timeframe": "30_days", "measureOfSuccess": "Документ с findings представлен leadership team"},
+            {"milestone": "Разработать и согласовать roadmap", "timeframe": "60_days", "measureOfSuccess": "Roadmap утверждён CTO и выделен бюджет"},
+            {"milestone": "Запустить первый quick-win проект", "timeframe": "90_days", "measureOfSuccess": "Measurable improvement в ключевой метрике"}
+          ]]
+        },
+        "shortTermKPIs": {
+          "type": "array",
+          "description": "KPI на 6 месяцев",
+          "items": {
+            "type": "object",
+            "properties": {
+              "metric": { "type": "string", "description": "Название метрики" },
+              "currentValue": { "type": "string", "description": "Текущее значение" },
+              "targetValue": { "type": "string", "description": "Целевое значение" }
+            }
+          },
+          "examples": [[
+            {"metric": "Pipeline uptime SLA", "currentValue": "95%", "targetValue": "99.5%"},
+            {"metric": "Data freshness", "currentValue": "24 часа", "targetValue": "1 час"},
+            {"metric": "Team velocity", "currentValue": "10 SP/sprint", "targetValue": "25 SP/sprint"}
+          ]]
+        },
+        "longTermGoals": {
+          "type": "array",
+          "description": "Стратегические цели на 1+ год",
+          "items": { "type": "string" },
+          "examples": [[
+            "Построить self-service data platform для всей компании",
+            "Выстроить data-driven culture в организации",
+            "Вырастить команду до 15 человек и выделить 3 подкоманды"
+          ]]
+        },
+        "businessMetrics": {
+          "type": "array",
+          "description": "Бизнес-метрики, на которые должен влиять этот человек",
+          "items": {
+            "type": "object",
+            "properties": {
+              "metric": { "type": "string" },
+              "impactType": { "type": "string", "enum": ["direct", "indirect", "enabling"] },
+              "description": { "type": "string" }
+            }
+          },
+          "examples": [[
+            {"metric": "Revenue", "impactType": "enabling", "description": "Качественные данные позволят улучшить конверсию на 15%"},
+            {"metric": "Cost reduction", "impactType": "direct", "description": "Оптимизация инфраструктуры сэкономит $200K/год"},
+            {"metric": "Time-to-market", "impactType": "indirect", "description": "Быстрый доступ к данным ускорит запуск фич на 30%"}
+          ]]
+        },
+        "qualitativeExpectations": {
+          "type": "string",
+          "description": "Качественные ожидания (лидерство, культура, влияние)",
+          "examples": [
+            "Должен стать thought leader в области data внутри компании",
+            "Ожидаем, что поднимет планку качества инженерной культуры",
+            "Будет представлять компанию на внешних мероприятиях и привлекать таланты"
+          ]
+        }
+      }
+    },
+
+    "differentiators": {
+      "title": "Дифференцирующие критерии",
+      "description": "Что отличает ИДЕАЛЬНОГО кандидата от просто подходящего. Ключевой блок для сужения поиска.",
+      "type": "object",
+      "properties": {
+        "industryExpertise": {
+          "type": "object",
+          "description": "Требуемая отраслевая экспертиза",
+          "properties": {
+            "industries": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Конкретные индустрии, опыт в которых критичен"
+            },
+            "whyMatters": { "type": "string", "description": "Почему именно этот отраслевой опыт важен" },
+            "regulatoryKnowledge": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Знание регуляторики (если применимо)"
+            }
+          },
+          "examples": [
+            {"industries": ["FinTech", "Banking"], "whyMatters": "Нужно понимание PCI DSS, работа с транзакционными данными", "regulatoryKnowledge": ["PCI DSS", "GDPR", "115-ФЗ"]}
+          ]
+        },
+        "domainKnowledge": {
+          "type": "array",
+          "description": "Знание специфических доменов/областей",
+          "items": { "type": "string" },
+          "examples": [["Real-time bidding", "Fraud detection", "Recommendation systems", "High-frequency trading"]]
+        },
+        "scaleExperience": {
+          "type": "object",
+          "description": "Опыт работы с определённым масштабом (критично для executive search)",
+          "properties": {
+            "teamSize": {
+              "type": "object",
+              "properties": {
+                "min": { "type": "integer" },
+                "description": { "type": "string" }
+              },
+              "description": "Размер команды в управлении"
+            },
+            "budget": {
+              "type": "object",
+              "properties": {
+                "min": { "type": "string" },
+                "currency": { "type": "string" }
+              },
+              "description": "Бюджет в управлении"
+            },
+            "dataVolume": { "type": "string", "description": "Объёмы данных (TB/PB, events/sec)" },
+            "usersScale": { "type": "string", "description": "Масштаб пользователей продукта" },
+            "revenueImpact": { "type": "string", "description": "Влияние на выручку" }
+          },
+          "examples": [
+            {"teamSize": {"min": 10, "description": "Управление командой от 10 инженеров"}, "dataVolume": "10+ PB, 1M events/sec", "usersScale": "10M+ MAU"}
+          ]
+        },
+        "achievementMarkers": {
+          "type": "array",
+          "description": "Конкретные достижения, которые хотим видеть в опыте кандидата",
+          "items": {
+            "type": "object",
+            "properties": {
+              "achievement": { "type": "string" },
+              "importance": { "type": "string", "enum": ["must_have", "strong_plus", "nice_to_have"] }
+            }
+          },
+          "examples": [[
+            {"achievement": "Построил data platform с нуля в растущей компании", "importance": "must_have"},
+            {"achievement": "Успешно мигрировал legacy систему на современный стек", "importance": "strong_plus"},
+            {"achievement": "Имеет публикации/выступления по теме", "importance": "nice_to_have"}
+          ]]
+        },
+        "companyBackground": {
+          "type": "object",
+          "description": "Предпочтительный бэкграунд по типам компаний",
+          "properties": {
+            "preferred": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Предпочтительные типы компаний"
+            },
+            "reasoning": { "type": "string" }
+          },
+          "examples": [
+            {"preferred": ["FAANG", "Top FinTech", "Успешные стартапы Series C+"], "reasoning": "Нужен опыт работы в компаниях с высокой инженерной культурой"}
+          ]
+        },
+        "networkValue": {
+          "type": "string",
+          "description": "Ценность нетворка кандидата (если важна)",
+          "examples": [
+            "Важны связи в FinTech-сообществе для найма команды",
+            "Контакты с вендорами cloud-платформ будут плюсом"
+          ]
+        },
+        "culturalFit": {
+          "type": "object",
+          "description": "Культурные маркеры и стиль работы",
+          "properties": {
+            "workStyle": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Предпочтительный стиль работы"
+            },
+            "leadershipStyle": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Стиль лидерства"
+            },
+            "environment": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "В какой среде должен был работать"
+            }
+          },
+          "examples": [
+            {"workStyle": ["Hands-on", "Data-driven decisions"], "leadershipStyle": ["Servant leadership", "Coaching"], "environment": ["Fast-paced", "Ambiguity-tolerant", "Startup mentality"]}
+          ]
+        }
+      }
+    },
+
+    "dealbreakers": {
+      "title": "Критические отсечки (Dealbreakers)",
+      "description": "Чёткие критерии отсечения кандидатов. Без выполнения этих критериев — не рассматриваем.",
+      "type": "object",
+      "properties": {
+        "absoluteRequirements": {
+          "type": "array",
+          "description": "Абсолютные требования без исключений (сертификации, допуски, юрисдикции)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "requirement": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          },
+          "examples": [[
+            {"requirement": "Гражданство РФ", "reason": "Работа с данными под 152-ФЗ"},
+            {"requirement": "Сертификация AWS Solutions Architect Professional", "reason": "Требование заказчика"},
+            {"requirement": "Отсутствие NDA, запрещающего работу в нашей индустрии", "reason": "Legal requirement"}
+          ]]
+        },
+        "experienceMinimums": {
+          "type": "object",
+          "description": "Минимальные пороги опыта (ниже — не рассматриваем)",
+          "properties": {
+            "totalYears": { "type": "integer", "description": "Общий опыт в годах" },
+            "domainYears": { "type": "integer", "description": "Опыт в конкретном домене" },
+            "leadershipYears": { "type": "integer", "description": "Опыт руководства" },
+            "specificExperience": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Конкретный опыт, без которого не подходит"
+            }
+          },
+          "examples": [
+            {"totalYears": 10, "domainYears": 5, "leadershipYears": 3, "specificExperience": ["High-load systems (1M+ RPS)", "Team building from scratch"]}
+          ]
+        },
+        "redFlags": {
+          "type": "array",
+          "description": "Что точно НЕ подходит (антипаттерны, warning signs)",
+          "items": { "type": "string" },
+          "examples": [[
+            "Частая смена работы (менее 1.5 лет на позиции без уважительной причины)",
+            "Только консалтинговый опыт без работы в продукте",
+            "Нет опыта работы в команде — только соло-работа",
+            "Конфликтные увольнения из предыдущих компаний"
+          ]]
+        },
+        "competitorPolicy": {
+          "type": "object",
+          "description": "Политика по отношению к кандидатам из конкурентов",
+          "properties": {
+            "policy": {
+              "type": "string",
+              "enum": ["actively_hire", "neutral", "avoid", "strict_avoid"],
+              "description": "Политика"
+            },
+            "companies": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Конкретные компании (если применимо)"
+            },
+            "reason": { "type": "string" }
+          },
+          "examples": [
+            {"policy": "actively_hire", "companies": ["Yandex", "VK", "Sber"], "reason": "Хотим людей с опытом в big tech"},
+            {"policy": "strict_avoid", "companies": ["Competitor X"], "reason": "NDA и legal risks"}
+          ]
+        },
+        "nonNegotiables": {
+          "type": "array",
+          "description": "Требования, которые не обсуждаются и не могут быть компенсированы другими качествами",
+          "items": { "type": "string" },
+          "examples": [[
+            "Production experience с Kubernetes — теорию не рассматриваем",
+            "Разговорный английский B2+ — созвоны с HQ ежедневно",
+            "Готовность к релокации в Москву — full remote не рассматриваем"
+          ]]
+        }
+      }
+    },
+
+    "searchDifficulty": {
+      "title": "Оценка сложности поиска",
+      "description": "Автоматически рассчитываемая оценка сложности закрытия позиции. Помогает рекрутеру понять масштаб задачи.",
+      "type": "object",
+      "properties": {
+        "marketRarity": {
+          "type": "string",
+          "enum": ["common", "uncommon", "rare", "very_rare", "unicorn"],
+          "description": "Редкость специалиста на рынке"
+        },
+        "estimatedPool": {
+          "type": "string",
+          "description": "Примерная оценка размера пула кандидатов",
+          "examples": ["~500 человек в РФ", "~50 человек с нужным опытом", "<10 идеальных кандидатов"]
+        },
+        "competitionLevel": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "extreme"],
+          "description": "Уровень конкуренции за таких специалистов"
+        },
+        "salaryCompetitiveness": {
+          "type": "string",
+          "enum": ["below_market", "market", "above_market", "top_of_market"],
+          "description": "Конкурентоспособность предложения по зарплате"
+        },
+        "recommendedStrategy": {
+          "type": "string",
+          "description": "Рекомендуемая стратегия поиска",
+          "examples": [
+            "Активный хантинг: нужно идти в конкретные компании и выходить на людей напрямую",
+            "Комбинированный подход: активный поиск + реферальная программа с повышенным бонусом",
+            "Executive search через агентство: рынок слишком узкий для самостоятельного поиска"
+          ]
+        },
+        "timeToHireEstimate": {
+          "type": "string",
+          "description": "Примерная оценка времени закрытия",
+          "examples": ["2-3 месяца при активном поиске", "4-6 месяцев, возможно потребуется пересмотр требований", "6+ месяцев, рекомендуем рассмотреть grow-your-own стратегию"]
+        },
+        "riskFactors": {
+          "type": "array",
+          "description": "Факторы риска, которые могут затруднить закрытие",
+          "items": { "type": "string" },
+          "examples": [[
+            "Зарплатные ожидания кандидатов выше бюджета на 20-30%",
+            "Конкуренты активно хантят в том же пуле",
+            "Требуется редкая комбинация навыков",
+            "Негативный бренд работодателя в целевом сегменте"
           ]]
         }
       }
@@ -582,7 +1078,7 @@
 
   "definitions": {
     "hierarchyLevels": {
-      "description": "Иерархия зависимостей между блоками. Если родительский блок не заполнен — дочерние поля пропускаются.",
+      "description": "Иерархия зависимостей между блоками для Executive Search. Переориентирована на бизнес-контекст вместо технических навыков.",
       "type": "object",
       "properties": {
         "level1_core": {
@@ -590,108 +1086,195 @@
           "required": true,
           "fields": ["core.jobTitle", "core.synonyms", "core.careerLevel", "core.industry"]
         },
-        "level2_company": {
-          "description": "Если company.name заполнено — открываются все поля компании",
-          "dependsOn": "company.name",
-          "fields": ["company.*", "company.activitySphere", "company.publicLinks"]
+        "level2_hiringContext": {
+          "description": "КРИТИЧНЫЙ для executive search. Понимание ЗАЧЕМ нужен человек.",
+          "priority": "critical",
+          "fields": ["hiringContext.triggerEvent", "hiringContext.businessProblem", "hiringContext.expectedImpact"]
         },
-        "level3_classification": {
-          "description": "Детализация классификации. Рекомендуется после core.",
-          "dependsOn": "core.industry",
-          "fields": ["classification.*"]
+        "level3_successCriteria": {
+          "description": "КРИТИЧНЫЙ. Определяет измеримые критерии успеха.",
+          "priority": "critical",
+          "fields": ["successCriteria.onboardingMilestones", "successCriteria.shortTermKPIs"]
         },
-        "level4_workConditions": {
-          "description": "Условия работы. Независимый блок.",
-          "fields": ["workConditions.*"]
+        "level4_differentiators": {
+          "description": "ВЫСОКИЙ ПРИОРИТЕТ. Формирует узкое горлышко поиска.",
+          "priority": "high",
+          "fields": ["differentiators.industryExpertise", "differentiators.scaleExperience", "differentiators.achievementMarkers"]
         },
-        "level5_requirements": {
-          "description": "Требования. Рекомендуется после classification для контекста.",
-          "fields": ["requirements.*"]
+        "level5_dealbreakers": {
+          "description": "ВЫСОКИЙ ПРИОРИТЕТ. Критические отсечки.",
+          "priority": "high",
+          "fields": ["dealbreakers.absoluteRequirements", "dealbreakers.experienceMinimums", "dealbreakers.nonNegotiables"]
         },
         "level6_responsibilities": {
-          "description": "Обязанности. businessProcesses.subprocesses зависят от businessProcesses.name",
-          "fields": ["responsibilities.*"]
+          "description": "Расширенные обязанности с критическими задачами.",
+          "priority": "medium",
+          "fields": ["responsibilities.criticalTasks", "responsibilities.processOwnership", "responsibilities.zones"]
         },
-        "level7_orgStructure": {
-          "description": "Оргструктура. Рекомендуется после company.",
+        "level7_requirements": {
+          "description": "Требования (ПОНИЖЕН приоритет skills для executive search).",
+          "priority": "medium",
+          "fields": ["requirements.experience.scaleIndicators", "requirements.skills", "requirements.languages"]
+        },
+        "level8_company": {
+          "description": "Информация о компании.",
+          "dependsOn": "company.name",
+          "fields": ["company.*", "company.activitySphere"]
+        },
+        "level9_workConditions": {
+          "description": "Условия работы (часто решается на переговорах).",
+          "priority": "low",
+          "fields": ["workConditions.*"]
+        },
+        "level10_orgStructure": {
+          "description": "Оргструктура.",
           "dependsOn": "company.name",
           "fields": ["orgStructure.*"]
         }
       }
     },
 
-    "keyParameters": {
-      "description": "Ключевые параметры для MVP. Минимум для качественной генерации JD.",
-      "critical": [
-        "core.jobTitle",
-        "core.careerLevel.code",
-        "requirements.skills (минимум 3-5 hard skills)"
-      ],
-      "important": [
-        "core.industry",
-        "company.name",
-        "workConditions.salary",
-        "workConditions.location",
-        "requirements.experience",
-        "responsibilities.zones"
-      ],
-      "recommended": [
-        "core.synonyms",
-        "classification.businessFunction",
-        "classification.roleFamily",
-        "requirements.languages",
-        "orgStructure.reportsTo",
-        "orgStructure.teamRoles"
-      ]
+    "executiveSearchPriorities": {
+      "description": "Приоритеты полей для Executive Search. Формируют 'воронку сужения' для поиска редких специалистов.",
+      "priority1_critical": {
+        "description": "БЕЗ ЭТОГО НЕ НАЧИНАЕМ ПОИСК. Формирует понимание бизнес-задачи.",
+        "fields": [
+          {"path": "hiringContext.businessProblem", "why": "Какую проблему решаем?"},
+          {"path": "hiringContext.triggerEvent", "why": "Почему открыли вакансию?"},
+          {"path": "successCriteria.onboardingMilestones", "why": "Что должен сделать за 90 дней?"},
+          {"path": "differentiators.industryExpertise", "why": "Какая отраслевая экспертиза критична?"}
+        ]
+      },
+      "priority2_high": {
+        "description": "ФОРМИРУЕТ ПРОФИЛЬ идеального кандидата.",
+        "fields": [
+          {"path": "dealbreakers.absoluteRequirements", "why": "Без чего точно нет?"},
+          {"path": "responsibilities.criticalTasks", "why": "Что делать в первую очередь?"},
+          {"path": "differentiators.scaleExperience", "why": "С каким масштабом должен был работать?"},
+          {"path": "successCriteria.shortTermKPIs", "why": "Какие KPI через 6 месяцев?"},
+          {"path": "differentiators.achievementMarkers", "why": "Какие достижения хотим видеть?"},
+          {"path": "requirements.experience.scaleIndicators", "why": "Какие масштабы опыта нужны?"}
+        ]
+      },
+      "priority3_standard": {
+        "description": "ДЕТАЛИЗАЦИЯ профиля. Skills ПОНИЖЕНЫ в приоритете.",
+        "fields": [
+          {"path": "core.careerLevel.code", "why": "Уровень позиции (вторичен для exec search)"},
+          {"path": "requirements.skills", "why": "Навыки — часто следствие нужного опыта"},
+          {"path": "responsibilities.zones", "why": "Зоны ответственности"},
+          {"path": "workConditions.salary", "why": "Часто обсуждается индивидуально"},
+          {"path": "requirements.experience", "why": "Общие требования к опыту"}
+        ]
+      },
+      "priority4_supporting": {
+        "description": "ПОДДЕРЖИВАЮЩАЯ информация.",
+        "fields": [
+          {"path": "company.activitySphere", "why": "Контекст компании"},
+          {"path": "workConditions.location", "why": "Локация"},
+          {"path": "orgStructure.reportsTo", "why": "Структура подчинения"},
+          {"path": "core.synonyms", "why": "Альтернативные названия"}
+        ]
+      }
     },
 
     "inputFlowRecommendation": {
-      "description": "Рекомендуемый порядок заполнения для интерфейса",
+      "description": "Рекомендуемый порядок заполнения для Executive Search. Начинаем с бизнес-контекста.",
       "steps": [
         {
           "step": 1,
-          "name": "Базовая информация",
-          "fields": ["core.jobTitle", "core.synonyms", "core.careerLevel"],
-          "required": true
+          "name": "Бизнес-контекст",
+          "description": "Понимаем ЗАЧЕМ нужен этот человек",
+          "fields": ["hiringContext.businessProblem", "hiringContext.triggerEvent", "hiringContext.expectedImpact", "hiringContext.urgencyReason"],
+          "required": true,
+          "executiveSearchCritical": true
         },
         {
           "step": 2,
-          "name": "Компания",
-          "fields": ["company.name", "company.type", "company.size", "company.activitySphere"],
-          "conditional": "Пропустить если компания конфиденциальна"
+          "name": "Критерии успеха",
+          "description": "Определяем измеримые KPI",
+          "fields": ["successCriteria.onboardingMilestones", "successCriteria.shortTermKPIs", "successCriteria.businessMetrics"],
+          "required": true,
+          "executiveSearchCritical": true
         },
         {
           "step": 3,
-          "name": "Классификация",
-          "fields": ["core.industry", "classification.businessFunction", "classification.roleFamily"],
-          "required": false
+          "name": "Базовая информация",
+          "description": "Название и уровень позиции",
+          "fields": ["core.jobTitle", "core.careerLevel", "core.industry"],
+          "required": true
         },
         {
           "step": 4,
-          "name": "Условия работы",
-          "fields": ["workConditions.salary", "workConditions.location", "workConditions.employmentType"],
-          "required": false
+          "name": "Дифференциаторы",
+          "description": "Что отличает ИДЕАЛЬНОГО кандидата",
+          "fields": ["differentiators.industryExpertise", "differentiators.scaleExperience", "differentiators.achievementMarkers", "differentiators.companyBackground"],
+          "required": true,
+          "note": "Ключевой блок для сужения поиска"
         },
         {
           "step": 5,
-          "name": "Требования",
-          "fields": ["requirements.skills", "requirements.experience", "requirements.languages"],
+          "name": "Критические отсечки",
+          "description": "Без чего точно не рассматриваем",
+          "fields": ["dealbreakers.absoluteRequirements", "dealbreakers.experienceMinimums", "dealbreakers.redFlags", "dealbreakers.nonNegotiables"],
           "required": true,
-          "note": "Критично для поиска редких специалистов"
+          "note": "Формирует жёсткие границы поиска"
         },
         {
           "step": 6,
-          "name": "Обязанности",
-          "fields": ["responsibilities.zones", "responsibilities.businessProcesses"],
-          "required": false
+          "name": "Критические задачи",
+          "description": "Что человек должен сделать в первые 90 дней",
+          "fields": ["responsibilities.criticalTasks", "responsibilities.processOwnership", "responsibilities.decisionAuthority"],
+          "required": true
         },
         {
           "step": 7,
+          "name": "Требования к опыту",
+          "description": "Масштаб и контекст опыта",
+          "fields": ["requirements.experience.scaleIndicators", "requirements.experience.contextualExperience", "requirements.experience.domains"],
+          "required": false
+        },
+        {
+          "step": 8,
+          "name": "Навыки и компетенции",
+          "description": "Технические и управленческие навыки (понижен приоритет)",
+          "fields": ["requirements.skills", "requirements.languages"],
+          "required": false,
+          "note": "Для executive search часто вторичны — следуют из опыта"
+        },
+        {
+          "step": 9,
+          "name": "Условия и компания",
+          "description": "Детали предложения",
+          "fields": ["workConditions.salary", "workConditions.location", "company.name", "company.type"],
+          "required": false
+        },
+        {
+          "step": 10,
           "name": "Оргструктура",
-          "fields": ["orgStructure.reportsTo", "orgStructure.teamRoles", "orgStructure.crossFunctionalLinks"],
+          "description": "Место в организации",
+          "fields": ["orgStructure.reportsTo", "orgStructure.subordinatesCount", "orgStructure.teamRoles"],
           "conditional": "Если company заполнена"
         }
       ]
+    },
+
+    "searchDifficultyCalculation": {
+      "description": "Алгоритм расчёта сложности поиска на основе заполненных данных",
+      "factors": [
+        {"factor": "Редкость отраслевой экспертизы", "weight": 0.25, "source": "differentiators.industryExpertise"},
+        {"factor": "Требования к масштабу опыта", "weight": 0.20, "source": "differentiators.scaleExperience"},
+        {"factor": "Количество dealbreakers", "weight": 0.20, "source": "dealbreakers.*"},
+        {"factor": "Специфичность достижений", "weight": 0.15, "source": "differentiators.achievementMarkers"},
+        {"factor": "Конкурентоспособность оффера", "weight": 0.10, "source": "workConditions.salary vs market"},
+        {"factor": "Локационные ограничения", "weight": 0.10, "source": "workConditions.location"}
+      ],
+      "rarityLevels": {
+        "common": "Заполнено <30% дифференциаторов, широкие критерии",
+        "uncommon": "Заполнено 30-50% дифференциаторов",
+        "rare": "Заполнено 50-70% дифференциаторов, есть жёсткие dealbreakers",
+        "very_rare": "Заполнено >70% дифференциаторов, множество dealbreakers",
+        "unicorn": "Уникальная комбинация требований, <10 кандидатов на рынке"
+      }
     }
   }
 }

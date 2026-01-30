@@ -38,6 +38,12 @@ DEPENDENCY_GROUPS = [
     {"company.activitySphere.sphere", "company.activitySphere.subSphere"},
     # Industry - иерархия
     {"core.industry"},
+    # Hiring Context - связанные поля
+    {"hiringContext.businessProblem", "hiringContext.expectedImpact"},
+    # Success Criteria - последовательность
+    {"successCriteria.onboardingMilestones", "successCriteria.shortTermKPIs"},
+    # Differentiators - связанные поля
+    {"differentiators.industryExpertise", "differentiators.scaleExperience"},
 ]
 
 
@@ -86,107 +92,217 @@ def _safe_get(d: dict, *keys: str) -> Any:
     return result
 
 
-# Приоритеты полей для обогащения
+# ============================================================================
+# ПРИОРИТЕТЫ ПОЛЕЙ ДЛЯ EXECUTIVE SEARCH
+# ============================================================================
+# Переориентировано с массового подбора на headhunting редких специалистов.
+# Фокус: бизнес-контекст → KPI → дифференциаторы → отсечки → детали.
+# Skills понижены в приоритете (для exec search они вторичны).
+# ============================================================================
+
 FIELD_PRIORITIES: list[dict[str, Any]] = [
-    # Critical - обязательно спрашивать
+    # =========================================================================
+    # PRIORITY 1: КРИТИЧНО — Бизнес-контекст (без этого не начинаем поиск)
+    # =========================================================================
+    {
+        "path": "hiringContext.businessProblem",
+        "priority": 1,
+        "description": "Какую бизнес-проблему должен решить этот человек? Конкретно и измеримо.",
+        "check": lambda d: bool(_safe_get(d, "hiringContext", "businessProblem")),
+        "question_hint": "executive_context",
+    },
+    {
+        "path": "hiringContext.triggerEvent",
+        "priority": 1,
+        "description": "Что послужило причиной открытия вакансии? (рост, замена, новое направление, кризис)",
+        "check": lambda d: bool(_safe_get(d, "hiringContext", "triggerEvent", "type")),
+        "question_hint": "executive_context",
+    },
+    {
+        "path": "successCriteria.onboardingMilestones",
+        "priority": 1,
+        "description": "Конкретные milestones первых 90 дней. Что человек ДОЛЖЕН сделать?",
+        "check": lambda d: len(_safe_get(d, "successCriteria", "onboardingMilestones") or []) >= 2,
+        "question_hint": "executive_kpi",
+    },
+    {
+        "path": "differentiators.industryExpertise",
+        "priority": 1,
+        "description": "Какая отраслевая экспертиза критична? Почему именно она важна?",
+        "check": lambda d: bool(_safe_get(d, "differentiators", "industryExpertise", "industries")),
+        "question_hint": "executive_differentiator",
+    },
+
+    # =========================================================================
+    # PRIORITY 2: ВЫСОКИЙ — Формирование профиля идеального кандидата
+    # =========================================================================
+    {
+        "path": "dealbreakers.absoluteRequirements",
+        "priority": 2,
+        "description": "Абсолютные требования без исключений (сертификации, допуски, гражданство)",
+        "check": lambda d: bool(_safe_get(d, "dealbreakers", "absoluteRequirements")),
+        "question_hint": "executive_dealbreaker",
+    },
+    {
+        "path": "responsibilities.criticalTasks",
+        "priority": 2,
+        "description": "Критические задачи первых 90 дней с индикаторами успеха",
+        "check": lambda d: len(_safe_get(d, "responsibilities", "criticalTasks") or []) >= 2,
+        "question_hint": "executive_tasks",
+    },
+    {
+        "path": "differentiators.scaleExperience",
+        "priority": 2,
+        "description": "С каким масштабом должен был работать? (команда, бюджет, объёмы данных)",
+        "check": lambda d: bool(_safe_get(d, "differentiators", "scaleExperience")),
+        "question_hint": "executive_scale",
+    },
+    {
+        "path": "successCriteria.shortTermKPIs",
+        "priority": 2,
+        "description": "Измеримые KPI на 6 месяцев (текущее значение → целевое)",
+        "check": lambda d: len(_safe_get(d, "successCriteria", "shortTermKPIs") or []) >= 2,
+        "depends_on": "successCriteria.onboardingMilestones",
+        "question_hint": "executive_kpi",
+    },
+    {
+        "path": "differentiators.achievementMarkers",
+        "priority": 2,
+        "description": "Конкретные достижения, которые хотим видеть в опыте кандидата",
+        "check": lambda d: len(_safe_get(d, "differentiators", "achievementMarkers") or []) >= 2,
+        "question_hint": "executive_differentiator",
+    },
+    {
+        "path": "hiringContext.expectedImpact",
+        "priority": 2,
+        "description": "Какой конкретный результат ожидается от найма этого человека?",
+        "check": lambda d: bool(_safe_get(d, "hiringContext", "expectedImpact")),
+        "depends_on": "hiringContext.businessProblem",
+        "question_hint": "executive_context",
+    },
+    {
+        "path": "dealbreakers.experienceMinimums",
+        "priority": 2,
+        "description": "Минимальные пороги опыта (общий, в домене, в руководстве)",
+        "check": lambda d: bool(_safe_get(d, "dealbreakers", "experienceMinimums", "totalYears")),
+        "question_hint": "executive_dealbreaker",
+    },
+
+    # =========================================================================
+    # PRIORITY 3: СТАНДАРТНЫЙ — Детализация профиля
+    # =========================================================================
     {
         "path": "core.careerLevel.code",
-        "priority": 1,
+        "priority": 3,
         "description": "Уровень позиции в карьерной иерархии",
         "check": lambda d: bool(_safe_get(d, "core", "careerLevel", "code")),
     },
     {
+        "path": "dealbreakers.nonNegotiables",
+        "priority": 3,
+        "description": "Требования, которые не обсуждаются и не компенсируются другими качествами",
+        "check": lambda d: bool(_safe_get(d, "dealbreakers", "nonNegotiables")),
+        "question_hint": "executive_dealbreaker",
+    },
+    {
+        "path": "requirements.experience.scaleIndicators",
+        "priority": 3,
+        "description": "Индикаторы масштаба опыта (команда, бюджет, проекты)",
+        "check": lambda d: bool(_safe_get(d, "requirements", "experience", "scaleIndicators")),
+    },
+    {
+        "path": "responsibilities.zones",
+        "priority": 3,
+        "description": "Зоны ответственности (минимум 3 для exec search)",
+        "check": lambda d: len(_safe_get(d, "responsibilities", "zones") or []) >= 3,
+    },
+    {
         "path": "requirements.skills",
-        "priority": 1,
-        "description": "Ключевые навыки и компетенции (минимум 3-5)",
+        "priority": 3,  # ПОНИЖЕН с 1 до 3 для executive search
+        "description": "Ключевые навыки (для exec search вторичны — следуют из опыта)",
         "check": lambda d: len(_safe_get(d, "requirements", "skills") or []) >= 3,
     },
-    # Important - высокий приоритет
     {
-        "path": "company.activitySphere.sphere",
-        "priority": 2,
-        "description": "Основная сфера деятельности компании",
-        "check": lambda d: bool(_safe_get(d, "company", "activitySphere", "sphere")),
-        "depends_on": None,
+        "path": "differentiators.companyBackground",
+        "priority": 3,
+        "description": "Предпочтительный бэкграунд по типам компаний (FAANG, стартапы, enterprise)",
+        "check": lambda d: bool(_safe_get(d, "differentiators", "companyBackground", "preferred")),
+        "question_hint": "executive_differentiator",
     },
     {
-        "path": "company.activitySphere.subSphere",
-        "priority": 2,
-        "description": "Подсфера деятельности компании",
-        "check": lambda d: bool(_safe_get(d, "company", "activitySphere", "subSphere")),
-        "depends_on": "company.activitySphere.sphere",
+        "path": "dealbreakers.redFlags",
+        "priority": 3,
+        "description": "Что точно НЕ подходит (антипаттерны, warning signs)",
+        "check": lambda d: bool(_safe_get(d, "dealbreakers", "redFlags")),
+        "question_hint": "executive_dealbreaker",
     },
+
+    # =========================================================================
+    # PRIORITY 4: ПОДДЕРЖИВАЮЩИЙ — Дополнительная информация
+    # =========================================================================
     {
         "path": "core.industry",
-        "priority": 2,
+        "priority": 4,
         "description": "Отрасль вакансии",
         "check": lambda d: bool(_safe_get(d, "core", "industry", "name")),
     },
     {
         "path": "workConditions.salary",
-        "priority": 2,
-        "description": "Зарплатная вилка",
+        "priority": 4,
+        "description": "Зарплатная вилка (для exec search часто обсуждается индивидуально)",
         "check": lambda d: bool(_safe_get(d, "workConditions", "salary")),
     },
     {
         "path": "workConditions.location",
-        "priority": 2,
+        "priority": 4,
         "description": "Локация и формат работы",
         "check": lambda d: bool(_safe_get(d, "workConditions", "location")),
     },
     {
+        "path": "company.activitySphere.sphere",
+        "priority": 4,
+        "description": "Основная сфера деятельности компании",
+        "check": lambda d: bool(_safe_get(d, "company", "activitySphere", "sphere")),
+    },
+    {
         "path": "requirements.experience",
-        "priority": 2,
-        "description": "Требования к опыту работы",
-        "check": lambda d: bool(_safe_get(d, "requirements", "experience")),
-    },
-    {
-        "path": "responsibilities.zones",
-        "priority": 2,
-        "description": "Зоны ответственности",
-        "check": lambda d: len(_safe_get(d, "responsibilities", "zones") or []) >= 2,
-    },
-    # Recommended - если есть время
-    {
-        "path": "core.synonyms",
-        "priority": 3,
-        "description": "Альтернативные названия позиции",
-        "check": lambda d: bool(_safe_get(d, "core", "synonyms")),
-    },
-    {
-        "path": "classification.businessFunction",
-        "priority": 3,
-        "description": "Бизнес-функция (IT, Finance, HR и т.д.)",
-        "check": lambda d: bool(_safe_get(d, "classification", "businessFunction")),
-    },
-    {
-        "path": "classification.roleFamily",
-        "priority": 3,
-        "description": "Семейство ролей (Engineering, Management и т.д.)",
-        "check": lambda d: bool(_safe_get(d, "classification", "roleFamily")),
-    },
-    {
-        "path": "requirements.languages",
-        "priority": 3,
-        "description": "Требования к языкам",
-        "check": lambda d: bool(_safe_get(d, "requirements", "languages")),
+        "priority": 4,
+        "description": "Общие требования к опыту работы",
+        "check": lambda d: bool(_safe_get(d, "requirements", "experience", "yearsMin")),
     },
     {
         "path": "orgStructure.reportsTo",
-        "priority": 3,
+        "priority": 4,
         "description": "Кому подчиняется позиция",
         "check": lambda d: bool(_safe_get(d, "orgStructure", "reportsTo")),
     },
     {
-        "path": "orgStructure.teamRoles",
-        "priority": 3,
-        "description": "Роли в команде",
-        "check": lambda d: bool(_safe_get(d, "orgStructure", "teamRoles")),
+        "path": "core.synonyms",
+        "priority": 4,
+        "description": "Альтернативные названия позиции",
+        "check": lambda d: bool(_safe_get(d, "core", "synonyms")),
+    },
+    {
+        "path": "requirements.languages",
+        "priority": 4,
+        "description": "Требования к языкам",
+        "check": lambda d: bool(_safe_get(d, "requirements", "languages")),
     },
 ]
 
 
-QUESTION_GENERATION_PROMPT = """Ты помогаешь обогатить вакансию для поиска УЗКОСПЕЦИАЛИЗИРОВАННЫХ специалистов.
+# ============================================================================
+# ПРОМПТЫ ДЛЯ EXECUTIVE SEARCH
+# ============================================================================
+# Адаптированы для глубокого понимания бизнес-контекста и формирования
+# "узкого горлышка" для поиска редких специалистов.
+# ============================================================================
+
+QUESTION_GENERATION_PROMPT = """Ты — эксперт по Executive Search, помогаешь рекрутеру сформировать профиль РЕДКОГО СПЕЦИАЛИСТА.
+
+Контекст: Мы ищем не просто подходящего кандидата, а уникального специалиста.
+Таких людей на рынке единицы (5-10 человек). Твоя задача — помочь рекрутеру
+правильно сформулировать критерии, чтобы найти именно того, кто нужен.
 
 Текущие данные вакансии:
 {vacancy_data}
@@ -194,41 +310,99 @@ QUESTION_GENERATION_PROMPT = """Ты помогаешь обогатить ва�
 Незаполненное поле: {field_path}
 Описание поля: {field_description}
 
-Сгенерируй вопрос и 3-4 релевантных варианта ответа.
+ВАЖНО — стиль вопроса зависит от типа поля:
+
+Для hiringContext (бизнес-контекст):
+- Спрашивай о ПРИЧИНАХ и ПРОБЛЕМАХ, а не о формальностях
+- "Что случилось в бизнесе, почему понадобился этот человек?"
+- "Какую конкретную проблему он должен решить?"
+- "Что произойдёт, если не найдём его в ближайшие 2 месяца?"
+
+Для successCriteria (KPI):
+- Спрашивай об ИЗМЕРИМЫХ результатах
+- "Что конкретно должен показать через 90 дней?"
+- "Какую метрику должен улучшить и насколько?"
+- "По какому критерию поймём, что наняли правильного человека?"
+
+Для differentiators (дифференциаторы):
+- Спрашивай о том, что ОТЛИЧАЕТ идеального от просто хорошего
+- "С каким масштабом должен был работать?"
+- "Какие конкретные достижения хотите видеть в резюме?"
+- "Из каких компаний предпочтительнее кандидат?"
+
+Для dealbreakers (отсечки):
+- Спрашивай о КРАСНЫХ ФЛАГАХ и МИНИМАЛЬНЫХ ПОРОГАХ
+- "Без какого опыта точно не рассматриваем?"
+- "Какой бэкграунд точно не подходит?"
+- "Есть ли ограничения по предыдущим работодателям?"
+
+Сгенерируй ОДИН глубокий вопрос и 3-4 релевантных варианта ответа.
 Варианты должны быть:
-1. Конкретными, не общими
-2. Релевантными контексту вакансии (учитывай jobTitle, industry, skills если есть)
-3. На русском языке
+1. КОНКРЕТНЫМИ — не "опыт в IT", а "опыт в high-load системах с 1M+ RPS"
+2. ДИФФЕРЕНЦИРУЮЩИМИ — помогают отличить идеального от среднего
+3. Релевантными контексту (учитывай jobTitle: {job_title}, если есть)
+4. На русском языке
 
 Формат ответа - ТОЛЬКО валидный JSON без markdown:
 {{
-  "question": "текст вопроса",
+  "question": "текст глубокого вопроса",
   "options": [
-    {{"value": "значение", "description": "краткое пояснение"}}
+    {{"value": "конкретное значение", "description": "почему это важно"}}
   ]
 }}"""
 
 
-ANSWER_PROCESSING_PROMPT = """Преобразуй ответ пользователя в структурированные данные для поля вакансии.
+ANSWER_PROCESSING_PROMPT = """Преобразуй ответ пользователя в структурированные данные для Executive Search вакансии.
 
 Поле: {field_path}
 Ответ пользователя: {answer}
 Текущие данные вакансии: {vacancy_data}
 
 Верни ТОЛЬКО валидный JSON с обновлённым значением для этого поля.
-Формат зависит от поля:
-- Для простых полей (string): {{"value": "строка"}}
-- Для объектов (industry, careerLevel): {{"value": {{"name": "...", "code": "..." если нужно}}}}
-- Для массивов (skills, zones): {{"value": [{{"name": "...", ...}}]}}
 
-Пример для core.careerLevel.code:
-{{"value": "senior"}}
+ПРАВИЛА ПРЕОБРАЗОВАНИЯ:
 
-Пример для company.activitySphere.sphere:
-{{"value": {{"name": "Информационные технологии"}}}}
+1. Для простых строковых полей:
+   {{"value": "строка"}}
 
-Пример для responsibilities.zones:
-{{"value": ["Разработка архитектуры", "Код-ревью", "Менторинг"]}}
+2. Для hiringContext.triggerEvent:
+   {{"value": {{"type": "growth|replacement|new_direction|crisis|transformation|m_and_a|restructuring", "description": "детали"}}}}
+
+3. Для successCriteria.onboardingMilestones (массив milestones):
+   {{"value": [{{"milestone": "описание", "timeframe": "30_days|60_days|90_days", "measureOfSuccess": "критерий успеха"}}]}}
+
+4. Для successCriteria.shortTermKPIs (массив KPI):
+   {{"value": [{{"metric": "название метрики", "currentValue": "текущее", "targetValue": "целевое"}}]}}
+
+5. Для differentiators.industryExpertise:
+   {{"value": {{"industries": ["индустрия1", "индустрия2"], "whyMatters": "почему важно"}}}}
+
+6. Для differentiators.scaleExperience:
+   {{"value": {{"teamSize": {{"min": число, "description": "пояснение"}}, "dataVolume": "объём", "usersScale": "масштаб"}}}}
+
+7. Для differentiators.achievementMarkers (массив достижений):
+   {{"value": [{{"achievement": "описание достижения", "importance": "must_have|strong_plus|nice_to_have"}}]}}
+
+8. Для dealbreakers.absoluteRequirements (массив требований):
+   {{"value": [{{"requirement": "требование", "reason": "причина"}}]}}
+
+9. Для dealbreakers.experienceMinimums:
+   {{"value": {{"totalYears": число, "domainYears": число, "leadershipYears": число}}}}
+
+10. Для responsibilities.criticalTasks (массив задач):
+    {{"value": [{{"task": "описание задачи", "deadline": "30|60|90 дней", "successIndicator": "индикатор успеха"}}]}}
+
+11. Для массивов строк (zones, redFlags, nonNegotiables):
+    {{"value": ["элемент1", "элемент2", "элемент3"]}}
+
+12. Для core.careerLevel.code:
+    {{"value": "intern|junior|middle|senior|lead|head|director|c-level"}}
+
+Пример для differentiators.industryExpertise:
+{{"value": {{"industries": ["FinTech", "Banking"], "whyMatters": "Нужно понимание PCI DSS и работа с транзакционными данными"}}}}
+
+Пример для successCriteria.onboardingMilestones:
+{{"value": [{{"milestone": "Провести аудит текущей инфраструктуры", "timeframe": "30_days", "measureOfSuccess": "Документ с findings и roadmap"}}]}}
 
 JSON:"""
 
@@ -444,11 +618,15 @@ class EnrichmentService:
         field_path: str,
         field_description: str,
     ) -> EnrichmentQuestion | None:
-        """Генерирует вопрос через LLM."""
+        """Генерирует вопрос через LLM для Executive Search."""
+        # Извлекаем job_title для контекста
+        job_title = _safe_get(vacancy_data, "core", "jobTitle") or "не указано"
+
         prompt = QUESTION_GENERATION_PROMPT.format(
             vacancy_data=json.dumps(vacancy_data, ensure_ascii=False, indent=2),
             field_path=field_path,
             field_description=field_description,
+            job_title=job_title,
         )
 
         response = await self._call_llm(prompt)
@@ -551,7 +729,7 @@ class EnrichmentService:
         field_path: str,
         value: Any,
     ) -> dict[str, Any]:
-        """Обновляет данные вакансии по пути к полю."""
+        """Обновляет данные вакансии по пути к полю. Поддерживает Executive Search поля."""
         import copy
 
         updated = copy.deepcopy(vacancy_data)
@@ -570,11 +748,86 @@ class EnrichmentService:
         # Специальная обработка для некоторых полей
         if field_path == "core.careerLevel.code" and isinstance(value, str):
             current[final_key] = value
+
         elif field_path.endswith(".sphere") or field_path.endswith(".subSphere"):
             if isinstance(value, str):
                 current[final_key] = {"name": value}
             else:
                 current[final_key] = value
+
+        # Executive Search: triggerEvent
+        elif field_path == "hiringContext.triggerEvent":
+            if isinstance(value, str):
+                current[final_key] = {"type": value, "description": ""}
+            else:
+                current[final_key] = value
+
+        # Executive Search: industryExpertise
+        elif field_path == "differentiators.industryExpertise":
+            if isinstance(value, list):
+                current[final_key] = {"industries": value, "whyMatters": ""}
+            elif isinstance(value, str):
+                current[final_key] = {"industries": [value], "whyMatters": ""}
+            else:
+                current[final_key] = value
+
+        # Executive Search: scaleExperience
+        elif field_path == "differentiators.scaleExperience":
+            if isinstance(value, str):
+                current[final_key] = {"teamSize": {"description": value}}
+            else:
+                current[final_key] = value
+
+        # Executive Search: experienceMinimums
+        elif field_path == "dealbreakers.experienceMinimums":
+            if isinstance(value, int):
+                current[final_key] = {"totalYears": value}
+            elif isinstance(value, str) and value.isdigit():
+                current[final_key] = {"totalYears": int(value)}
+            else:
+                current[final_key] = value
+
+        # Executive Search: массивы объектов (milestones, KPIs, achievements, requirements, tasks)
+        elif field_path in [
+            "successCriteria.onboardingMilestones",
+            "successCriteria.shortTermKPIs",
+            "differentiators.achievementMarkers",
+            "dealbreakers.absoluteRequirements",
+            "responsibilities.criticalTasks",
+        ]:
+            if isinstance(value, list):
+                current[final_key] = value
+            elif isinstance(value, str):
+                # Если пришла строка, пробуем преобразовать в массив с одним элементом
+                if field_path == "successCriteria.onboardingMilestones":
+                    current[final_key] = [{"milestone": value, "timeframe": "90_days", "measureOfSuccess": ""}]
+                elif field_path == "successCriteria.shortTermKPIs":
+                    current[final_key] = [{"metric": value, "currentValue": "", "targetValue": ""}]
+                elif field_path == "differentiators.achievementMarkers":
+                    current[final_key] = [{"achievement": value, "importance": "must_have"}]
+                elif field_path == "dealbreakers.absoluteRequirements":
+                    current[final_key] = [{"requirement": value, "reason": ""}]
+                elif field_path == "responsibilities.criticalTasks":
+                    current[final_key] = [{"task": value, "deadline": "90 дней", "successIndicator": ""}]
+            else:
+                current[final_key] = value
+
+        # Массивы строк
+        elif field_path in [
+            "responsibilities.zones",
+            "dealbreakers.redFlags",
+            "dealbreakers.nonNegotiables",
+            "responsibilities.processOwnership",
+            "differentiators.domainKnowledge",
+            "successCriteria.longTermGoals",
+        ]:
+            if isinstance(value, str):
+                # Разбиваем по запятой или новой строке
+                items = [v.strip() for v in value.replace("\n", ",").split(",") if v.strip()]
+                current[final_key] = items if items else [value]
+            else:
+                current[final_key] = value
+
         else:
             current[final_key] = value
 

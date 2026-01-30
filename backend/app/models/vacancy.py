@@ -172,6 +172,107 @@ class BusinessSegment(str, Enum):
     D2C = "D2C"
 
 
+# ============ EXECUTIVE SEARCH ENUMS ============
+
+
+class TriggerEventType(str, Enum):
+    """Тип события, послужившего причиной открытия вакансии"""
+
+    GROWTH = "growth"
+    REPLACEMENT = "replacement"
+    NEW_DIRECTION = "new_direction"
+    CRISIS = "crisis"
+    TRANSFORMATION = "transformation"
+    M_AND_A = "m_and_a"
+    RESTRUCTURING = "restructuring"
+
+
+class MilestoneTimeframe(str, Enum):
+    """Временные рамки для milestones"""
+
+    DAYS_30 = "30_days"
+    DAYS_60 = "60_days"
+    DAYS_90 = "90_days"
+
+
+class ImpactType(str, Enum):
+    """Тип влияния на метрику"""
+
+    DIRECT = "direct"
+    INDIRECT = "indirect"
+    ENABLING = "enabling"
+
+
+class AchievementImportance(str, Enum):
+    """Важность достижения"""
+
+    MUST_HAVE = "must_have"
+    STRONG_PLUS = "strong_plus"
+    NICE_TO_HAVE = "nice_to_have"
+
+
+class CompetitorPolicy(str, Enum):
+    """Политика по отношению к кандидатам из конкурентов"""
+
+    ACTIVELY_HIRE = "actively_hire"
+    NEUTRAL = "neutral"
+    AVOID = "avoid"
+    STRICT_AVOID = "strict_avoid"
+
+
+class MarketRarity(str, Enum):
+    """Редкость специалиста на рынке"""
+
+    COMMON = "common"
+    UNCOMMON = "uncommon"
+    RARE = "rare"
+    VERY_RARE = "very_rare"
+    UNICORN = "unicorn"
+
+
+class CompetitionLevel(str, Enum):
+    """Уровень конкуренции за специалиста"""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    EXTREME = "extreme"
+
+
+class SalaryCompetitiveness(str, Enum):
+    """Конкурентоспособность зарплаты"""
+
+    BELOW_MARKET = "below_market"
+    MARKET = "market"
+    ABOVE_MARKET = "above_market"
+    TOP_OF_MARKET = "top_of_market"
+
+
+class DecisionAuthority(str, Enum):
+    """Уровень полномочий в принятии решений"""
+
+    NONE = "none"
+    ADVISORY = "advisory"
+    RECOMMEND = "recommend"
+    INFLUENCE = "influence"
+    PROPOSE = "propose"
+    MANAGE = "manage"
+    APPROVAL = "approval"
+    APPROVE = "approve"
+    FINAL = "final"
+
+
+class CompanyStage(str, Enum):
+    """Стадия компании"""
+
+    STARTUP_EARLY = "startup_early"
+    STARTUP_GROWTH = "startup_growth"
+    SCALEUP = "scaleup"
+    ENTERPRISE = "enterprise"
+    TURNAROUND = "turnaround"
+    M_AND_A = "m_and_a"
+
+
 # ============ NESTED MODELS ============
 
 
@@ -300,14 +401,53 @@ class Education(BaseModel):
     comment: Optional[str] = None
 
 
+class TeamManagement(BaseModel):
+    """Информация об управлении командой"""
+
+    direct_reports: Optional[str] = Field(None, alias="directReports")
+    total_team: Optional[str] = Field(None, alias="totalTeam")
+
+    class Config:
+        populate_by_name = True
+
+
+class ScaleIndicators(BaseModel):
+    """Индикаторы масштаба опыта"""
+
+    team_management: Optional[TeamManagement] = Field(None, alias="teamManagement")
+    budget_management: Optional[str] = Field(None, alias="budgetManagement")
+    project_scale: Optional[str] = Field(None, alias="projectScale")
+    business_impact: Optional[str] = Field(None, alias="businessImpact")
+
+    class Config:
+        populate_by_name = True
+
+
+class ContextualExperience(BaseModel):
+    """Контекстный опыт"""
+
+    company_stages: Optional[list[CompanyStage]] = Field(None, alias="companyStages")
+    situations: Optional[list[str]] = None
+
+    class Config:
+        populate_by_name = True
+
+
 class Experience(BaseModel):
-    """Требования к опыту"""
+    """Требования к опыту. Расширен для executive search."""
 
     years_min: Optional[int] = Field(None, ge=0, alias="yearsMin")
     years_max: Optional[int] = Field(None, ge=0, alias="yearsMax")
     domains: Optional[list[str]] = None
     must_have: Optional[list[str]] = Field(None, alias="mustHave")
     nice_to_have: Optional[list[str]] = Field(None, alias="niceToHave")
+    # Executive Search расширения
+    scale_indicators: Optional[ScaleIndicators] = Field(
+        None, alias="scaleIndicators", description="Индикаторы масштаба опыта"
+    )
+    contextual_experience: Optional[ContextualExperience] = Field(
+        None, alias="contextualExperience", description="Контекстный опыт"
+    )
 
     class Config:
         populate_by_name = True
@@ -353,6 +493,170 @@ class BusinessProcess(BaseModel):
     id: Optional[str] = None
     name: str
     subprocesses: Optional[list[Subprocess]] = None
+
+
+# ============ EXECUTIVE SEARCH NESTED MODELS ============
+
+
+class TriggerEvent(BaseModel):
+    """Событие, послужившее причиной открытия вакансии"""
+
+    type: Optional[TriggerEventType] = None
+    description: Optional[str] = None
+
+
+class PreviousAttempts(BaseModel):
+    """Информация о предыдущих попытках закрыть вакансию"""
+
+    had_attempts: Optional[bool] = Field(None, alias="hadAttempts")
+    duration: Optional[str] = None
+    candidates_seen: Optional[int] = Field(None, alias="candidatesSeen")
+    why_failed: Optional[str] = Field(None, alias="whyFailed")
+
+    class Config:
+        populate_by_name = True
+
+
+class OnboardingMilestone(BaseModel):
+    """Milestone первых 90 дней"""
+
+    milestone: Optional[str] = None
+    timeframe: Optional[MilestoneTimeframe] = None
+    measure_of_success: Optional[str] = Field(None, alias="measureOfSuccess")
+
+    class Config:
+        populate_by_name = True
+
+
+class ShortTermKPI(BaseModel):
+    """KPI на 6 месяцев"""
+
+    metric: Optional[str] = None
+    current_value: Optional[str] = Field(None, alias="currentValue")
+    target_value: Optional[str] = Field(None, alias="targetValue")
+
+    class Config:
+        populate_by_name = True
+
+
+class BusinessMetric(BaseModel):
+    """Бизнес-метрика с типом влияния"""
+
+    metric: Optional[str] = None
+    impact_type: Optional[ImpactType] = Field(None, alias="impactType")
+    description: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class IndustryExpertise(BaseModel):
+    """Требуемая отраслевая экспертиза"""
+
+    industries: Optional[list[str]] = None
+    why_matters: Optional[str] = Field(None, alias="whyMatters")
+    regulatory_knowledge: Optional[list[str]] = Field(None, alias="regulatoryKnowledge")
+
+    class Config:
+        populate_by_name = True
+
+
+class TeamSizeRequirement(BaseModel):
+    """Требование по размеру команды"""
+
+    min: Optional[int] = None
+    description: Optional[str] = None
+
+
+class BudgetRequirement(BaseModel):
+    """Требование по бюджету"""
+
+    min: Optional[str] = None
+    currency: Optional[str] = None
+
+
+class ScaleExperience(BaseModel):
+    """Опыт работы с определённым масштабом"""
+
+    team_size: Optional[TeamSizeRequirement] = Field(None, alias="teamSize")
+    budget: Optional[BudgetRequirement] = None
+    data_volume: Optional[str] = Field(None, alias="dataVolume")
+    users_scale: Optional[str] = Field(None, alias="usersScale")
+    revenue_impact: Optional[str] = Field(None, alias="revenueImpact")
+
+    class Config:
+        populate_by_name = True
+
+
+class AchievementMarker(BaseModel):
+    """Маркер достижения"""
+
+    achievement: Optional[str] = None
+    importance: Optional[AchievementImportance] = None
+
+
+class CompanyBackground(BaseModel):
+    """Предпочтительный бэкграунд по типам компаний"""
+
+    preferred: Optional[list[str]] = None
+    reasoning: Optional[str] = None
+
+
+class CulturalFit(BaseModel):
+    """Культурные маркеры и стиль работы"""
+
+    work_style: Optional[list[str]] = Field(None, alias="workStyle")
+    leadership_style: Optional[list[str]] = Field(None, alias="leadershipStyle")
+    environment: Optional[list[str]] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class AbsoluteRequirement(BaseModel):
+    """Абсолютное требование без исключений"""
+
+    requirement: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class ExperienceMinimums(BaseModel):
+    """Минимальные пороги опыта"""
+
+    total_years: Optional[int] = Field(None, alias="totalYears")
+    domain_years: Optional[int] = Field(None, alias="domainYears")
+    leadership_years: Optional[int] = Field(None, alias="leadershipYears")
+    specific_experience: Optional[list[str]] = Field(None, alias="specificExperience")
+
+    class Config:
+        populate_by_name = True
+
+
+class CompetitorPolicyInfo(BaseModel):
+    """Политика по отношению к кандидатам из конкурентов"""
+
+    policy: Optional[CompetitorPolicy] = None
+    companies: Optional[list[str]] = None
+    reason: Optional[str] = None
+
+
+class CriticalTask(BaseModel):
+    """Критическая задача первых 90 дней"""
+
+    task: Optional[str] = None
+    deadline: Optional[str] = None
+    success_indicator: Optional[str] = Field(None, alias="successIndicator")
+
+    class Config:
+        populate_by_name = True
+
+
+class DecisionAuthorityLevels(BaseModel):
+    """Уровни полномочий в принятии решений"""
+
+    technical: Optional[DecisionAuthority] = None
+    hiring: Optional[DecisionAuthority] = None
+    budget: Optional[DecisionAuthority] = None
 
 
 # ============ MAIN BLOCKS ============
@@ -429,10 +733,20 @@ class VacancyRequirements(BaseModel):
 
 
 class VacancyResponsibilities(BaseModel):
-    """Обязанности и зоны ответственности"""
+    """Обязанности и зоны ответственности. Расширен для executive search."""
 
     scope: Optional[str] = None
     zones: Optional[list[str]] = None
+    # Executive Search расширения
+    critical_tasks: Optional[list[CriticalTask]] = Field(
+        None, alias="criticalTasks", description="Критические задачи первых 90 дней"
+    )
+    process_ownership: Optional[list[str]] = Field(
+        None, alias="processOwnership", description="Процессы, которыми будет владеть"
+    )
+    decision_authority: Optional[DecisionAuthorityLevels] = Field(
+        None, alias="decisionAuthority", description="Уровень полномочий в принятии решений"
+    )
     competency_model: Optional[str] = Field(None, alias="competencyModel")
     business_processes: Optional[list[BusinessProcess]] = Field(None, alias="businessProcesses")
 
@@ -448,6 +762,154 @@ class VacancyOrgStructure(BaseModel):
     org_unit: Optional[str] = Field(None, alias="orgUnit")
     team_roles: Optional[list[str]] = Field(None, alias="teamRoles")
     cross_functional_links: Optional[list[str]] = Field(None, alias="crossFunctionalLinks")
+
+    class Config:
+        populate_by_name = True
+
+
+# ============ EXECUTIVE SEARCH BLOCKS ============
+
+
+class HiringContext(BaseModel):
+    """
+    Контекст найма (Executive Search).
+    КРИТИЧЕСКИЙ БЛОК: определяет ЗАЧЕМ нужен этот человек, а не просто КТО нужен.
+    """
+
+    trigger_event: Optional[TriggerEvent] = Field(
+        None, alias="triggerEvent", description="Что послужило причиной открытия вакансии"
+    )
+    business_problem: Optional[str] = Field(
+        None, alias="businessProblem", description="Какую бизнес-проблему должен решить"
+    )
+    expected_impact: Optional[str] = Field(
+        None, alias="expectedImpact", description="Какой результат ожидается от найма"
+    )
+    urgency_reason: Optional[str] = Field(
+        None, alias="urgencyReason", description="Почему срочно"
+    )
+    previous_attempts: Optional[PreviousAttempts] = Field(
+        None, alias="previousAttempts", description="Были ли попытки закрыть раньше"
+    )
+    stakeholder_expectations: Optional[str] = Field(
+        None, alias="stakeholderExpectations", description="Ожидания ключевых стейкхолдеров"
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class SuccessCriteria(BaseModel):
+    """
+    Критерии успеха и KPI.
+    Измеримые критерии, по которым оценим успех найма.
+    """
+
+    onboarding_milestones: Optional[list[OnboardingMilestone]] = Field(
+        None, alias="onboardingMilestones", description="Milestones первых 90 дней"
+    )
+    short_term_kpis: Optional[list[ShortTermKPI]] = Field(
+        None, alias="shortTermKPIs", description="KPI на 6 месяцев"
+    )
+    long_term_goals: Optional[list[str]] = Field(
+        None, alias="longTermGoals", description="Стратегические цели на 1+ год"
+    )
+    business_metrics: Optional[list[BusinessMetric]] = Field(
+        None, alias="businessMetrics", description="Бизнес-метрики"
+    )
+    qualitative_expectations: Optional[str] = Field(
+        None, alias="qualitativeExpectations", description="Качественные ожидания"
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class Differentiators(BaseModel):
+    """
+    Дифференцирующие критерии.
+    Что отличает ИДЕАЛЬНОГО кандидата от просто подходящего.
+    """
+
+    industry_expertise: Optional[IndustryExpertise] = Field(
+        None, alias="industryExpertise", description="Требуемая отраслевая экспертиза"
+    )
+    domain_knowledge: Optional[list[str]] = Field(
+        None, alias="domainKnowledge", description="Знание специфических доменов"
+    )
+    scale_experience: Optional[ScaleExperience] = Field(
+        None, alias="scaleExperience", description="Опыт работы с определённым масштабом"
+    )
+    achievement_markers: Optional[list[AchievementMarker]] = Field(
+        None, alias="achievementMarkers", description="Конкретные достижения"
+    )
+    company_background: Optional[CompanyBackground] = Field(
+        None, alias="companyBackground", description="Предпочтительный бэкграунд"
+    )
+    network_value: Optional[str] = Field(
+        None, alias="networkValue", description="Ценность нетворка"
+    )
+    cultural_fit: Optional[CulturalFit] = Field(
+        None, alias="culturalFit", description="Культурные маркеры"
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class Dealbreakers(BaseModel):
+    """
+    Критические отсечки (Dealbreakers).
+    Чёткие критерии отсечения кандидатов.
+    """
+
+    absolute_requirements: Optional[list[AbsoluteRequirement]] = Field(
+        None, alias="absoluteRequirements", description="Абсолютные требования"
+    )
+    experience_minimums: Optional[ExperienceMinimums] = Field(
+        None, alias="experienceMinimums", description="Минимальные пороги опыта"
+    )
+    red_flags: Optional[list[str]] = Field(
+        None, alias="redFlags", description="Что точно НЕ подходит"
+    )
+    competitor_policy: Optional[CompetitorPolicyInfo] = Field(
+        None, alias="competitorPolicy", description="Политика по конкурентам"
+    )
+    non_negotiables: Optional[list[str]] = Field(
+        None, alias="nonNegotiables", description="Требования, которые не обсуждаются"
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class SearchDifficulty(BaseModel):
+    """
+    Оценка сложности поиска.
+    Автоматически рассчитываемая оценка сложности закрытия позиции.
+    """
+
+    market_rarity: Optional[MarketRarity] = Field(
+        None, alias="marketRarity", description="Редкость специалиста на рынке"
+    )
+    estimated_pool: Optional[str] = Field(
+        None, alias="estimatedPool", description="Примерный размер пула кандидатов"
+    )
+    competition_level: Optional[CompetitionLevel] = Field(
+        None, alias="competitionLevel", description="Уровень конкуренции"
+    )
+    salary_competitiveness: Optional[SalaryCompetitiveness] = Field(
+        None, alias="salaryCompetitiveness", description="Конкурентоспособность зарплаты"
+    )
+    recommended_strategy: Optional[str] = Field(
+        None, alias="recommendedStrategy", description="Рекомендуемая стратегия поиска"
+    )
+    time_to_hire_estimate: Optional[str] = Field(
+        None, alias="timeToHireEstimate", description="Примерная оценка времени закрытия"
+    )
+    risk_factors: Optional[list[str]] = Field(
+        None, alias="riskFactors", description="Факторы риска"
+    )
 
     class Config:
         populate_by_name = True
@@ -475,7 +937,7 @@ class VacancyMetadata(BaseModel):
 class VacancyInput(BaseModel):
     """
     Полная структура входных параметров вакансии.
-    Рассчитана на поиск редких и узкоспециализированных специалистов.
+    Рассчитана на Executive Search - поиск редких и узкоспециализированных специалистов.
     """
 
     core: VacancyCore = Field(..., description="Ядро вакансии (обязательный блок)")
@@ -485,6 +947,22 @@ class VacancyInput(BaseModel):
     requirements: Optional[VacancyRequirements] = None
     responsibilities: Optional[VacancyResponsibilities] = None
     org_structure: Optional[VacancyOrgStructure] = Field(None, alias="orgStructure")
+    # Executive Search блоки
+    hiring_context: Optional[HiringContext] = Field(
+        None, alias="hiringContext", description="Контекст найма (КРИТИЧНО для executive search)"
+    )
+    success_criteria: Optional[SuccessCriteria] = Field(
+        None, alias="successCriteria", description="Критерии успеха и KPI"
+    )
+    differentiators: Optional[Differentiators] = Field(
+        None, description="Дифференцирующие критерии (что отличает идеального кандидата)"
+    )
+    dealbreakers: Optional[Dealbreakers] = Field(
+        None, description="Критические отсечки"
+    )
+    search_difficulty: Optional[SearchDifficulty] = Field(
+        None, alias="searchDifficulty", description="Оценка сложности поиска (авто-расчёт)"
+    )
     full_text: Optional[VacancyFullText] = Field(None, alias="fullText")
     metadata: Optional[VacancyMetadata] = None
 

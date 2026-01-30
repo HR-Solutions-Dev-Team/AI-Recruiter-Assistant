@@ -119,6 +119,63 @@ export type TextSource = "manual" | "generated" | "imported";
 
 export type BusinessSegment = "B2B" | "B2C" | "B2B2C" | "B2G" | "C2C" | "D2C";
 
+// ============ EXECUTIVE SEARCH ENUMS ============
+
+export type TriggerEventType =
+  | "growth"
+  | "replacement"
+  | "new_direction"
+  | "crisis"
+  | "transformation"
+  | "m_and_a"
+  | "restructuring";
+
+export type MilestoneTimeframe = "30_days" | "60_days" | "90_days";
+
+export type ImpactType = "direct" | "indirect" | "enabling";
+
+export type AchievementImportance = "must_have" | "strong_plus" | "nice_to_have";
+
+export type CompetitorPolicy =
+  | "actively_hire"
+  | "neutral"
+  | "avoid"
+  | "strict_avoid";
+
+export type MarketRarity =
+  | "common"
+  | "uncommon"
+  | "rare"
+  | "very_rare"
+  | "unicorn";
+
+export type CompetitionLevel = "low" | "medium" | "high" | "extreme";
+
+export type SalaryCompetitiveness =
+  | "below_market"
+  | "market"
+  | "above_market"
+  | "top_of_market";
+
+export type DecisionAuthorityLevel =
+  | "none"
+  | "advisory"
+  | "recommend"
+  | "influence"
+  | "propose"
+  | "manage"
+  | "approval"
+  | "approve"
+  | "final";
+
+export type CompanyStage =
+  | "startup_early"
+  | "startup_growth"
+  | "scaleup"
+  | "enterprise"
+  | "turnaround"
+  | "m_and_a";
+
 // ============ NESTED INTERFACES ============
 
 export interface CareerLevel {
@@ -214,6 +271,10 @@ export interface Experience {
   domains?: string[];
   mustHave?: string[];
   niceToHave?: string[];
+  /** Индикаторы масштаба опыта (Executive Search) */
+  scaleIndicators?: ScaleIndicators;
+  /** Контекстный опыт (Executive Search) */
+  contextualExperience?: ContextualExperience;
 }
 
 export interface Skill {
@@ -242,6 +303,145 @@ export interface BusinessProcess {
   id?: string;
   name: string;
   subprocesses?: Subprocess[];
+}
+
+// ============ EXECUTIVE SEARCH INTERFACES ============
+
+/** Событие, послужившее причиной открытия вакансии */
+export interface TriggerEvent {
+  type?: TriggerEventType;
+  description?: string;
+}
+
+/** Информация о предыдущих попытках закрыть вакансию */
+export interface PreviousAttempts {
+  hadAttempts?: boolean;
+  duration?: string;
+  candidatesSeen?: number;
+  whyFailed?: string;
+}
+
+/** Milestone первых 90 дней */
+export interface OnboardingMilestone {
+  milestone?: string;
+  timeframe?: MilestoneTimeframe;
+  measureOfSuccess?: string;
+}
+
+/** KPI на 6 месяцев */
+export interface ShortTermKPI {
+  metric?: string;
+  currentValue?: string;
+  targetValue?: string;
+}
+
+/** Бизнес-метрика с типом влияния */
+export interface BusinessMetric {
+  metric?: string;
+  impactType?: ImpactType;
+  description?: string;
+}
+
+/** Требуемая отраслевая экспертиза */
+export interface IndustryExpertise {
+  industries?: string[];
+  whyMatters?: string;
+  regulatoryKnowledge?: string[];
+}
+
+/** Требование по размеру команды */
+export interface TeamSizeRequirement {
+  min?: number;
+  description?: string;
+}
+
+/** Требование по бюджету */
+export interface BudgetRequirement {
+  min?: string;
+  currency?: string;
+}
+
+/** Опыт работы с определённым масштабом */
+export interface ScaleExperience {
+  teamSize?: TeamSizeRequirement;
+  budget?: BudgetRequirement;
+  dataVolume?: string;
+  usersScale?: string;
+  revenueImpact?: string;
+}
+
+/** Маркер достижения */
+export interface AchievementMarker {
+  achievement?: string;
+  importance?: AchievementImportance;
+}
+
+/** Предпочтительный бэкграунд по типам компаний */
+export interface CompanyBackground {
+  preferred?: string[];
+  reasoning?: string;
+}
+
+/** Культурные маркеры и стиль работы */
+export interface CulturalFit {
+  workStyle?: string[];
+  leadershipStyle?: string[];
+  environment?: string[];
+}
+
+/** Абсолютное требование без исключений */
+export interface AbsoluteRequirement {
+  requirement?: string;
+  reason?: string;
+}
+
+/** Минимальные пороги опыта */
+export interface ExperienceMinimums {
+  totalYears?: number;
+  domainYears?: number;
+  leadershipYears?: number;
+  specificExperience?: string[];
+}
+
+/** Политика по отношению к кандидатам из конкурентов */
+export interface CompetitorPolicyInfo {
+  policy?: CompetitorPolicy;
+  companies?: string[];
+  reason?: string;
+}
+
+/** Критическая задача первых 90 дней */
+export interface CriticalTask {
+  task?: string;
+  deadline?: string;
+  successIndicator?: string;
+}
+
+/** Уровни полномочий в принятии решений */
+export interface DecisionAuthorityLevels {
+  technical?: DecisionAuthorityLevel;
+  hiring?: DecisionAuthorityLevel;
+  budget?: DecisionAuthorityLevel;
+}
+
+/** Информация об управлении командой */
+export interface TeamManagement {
+  directReports?: string;
+  totalTeam?: string;
+}
+
+/** Индикаторы масштаба опыта */
+export interface ScaleIndicators {
+  teamManagement?: TeamManagement;
+  budgetManagement?: string;
+  projectScale?: string;
+  businessImpact?: string;
+}
+
+/** Контекстный опыт */
+export interface ContextualExperience {
+  companyStages?: CompanyStage[];
+  situations?: string[];
 }
 
 // ============ MAIN BLOCKS ============
@@ -331,13 +531,19 @@ export interface VacancyRequirements {
 }
 
 /**
- * Обязанности и зоны ответственности
+ * Обязанности и зоны ответственности (расширено для Executive Search)
  */
 export interface VacancyResponsibilities {
   /** Общее описание зоны ответственности */
   scope?: string;
   /** Конкретные зоны ответственности */
   zones?: string[];
+  /** Критические задачи первых 90 дней (Executive Search) */
+  criticalTasks?: CriticalTask[];
+  /** Процессы, которыми будет владеть (Executive Search) */
+  processOwnership?: string[];
+  /** Уровень полномочий в принятии решений (Executive Search) */
+  decisionAuthority?: DecisionAuthorityLevels;
   /** Модель компетенций */
   competencyModel?: string;
   /** Бизнес-процессы (двухуровневая иерархия) */
@@ -358,6 +564,103 @@ export interface VacancyOrgStructure {
   teamRoles?: string[];
   /** Кросс-функциональные взаимодействия */
   crossFunctionalLinks?: string[];
+}
+
+// ============ EXECUTIVE SEARCH BLOCKS ============
+
+/**
+ * Контекст найма (Executive Search)
+ * КРИТИЧЕСКИЙ БЛОК: определяет ЗАЧЕМ нужен этот человек
+ */
+export interface HiringContext {
+  /** Что послужило причиной открытия вакансии */
+  triggerEvent?: TriggerEvent;
+  /** Какую бизнес-проблему должен решить */
+  businessProblem?: string;
+  /** Какой результат ожидается от найма */
+  expectedImpact?: string;
+  /** Почему срочно */
+  urgencyReason?: string;
+  /** Были ли попытки закрыть раньше */
+  previousAttempts?: PreviousAttempts;
+  /** Ожидания ключевых стейкхолдеров */
+  stakeholderExpectations?: string;
+}
+
+/**
+ * Критерии успеха и KPI
+ * Измеримые критерии, по которым оценим успех найма
+ */
+export interface SuccessCriteria {
+  /** Milestones первых 90 дней */
+  onboardingMilestones?: OnboardingMilestone[];
+  /** KPI на 6 месяцев */
+  shortTermKPIs?: ShortTermKPI[];
+  /** Стратегические цели на 1+ год */
+  longTermGoals?: string[];
+  /** Бизнес-метрики */
+  businessMetrics?: BusinessMetric[];
+  /** Качественные ожидания */
+  qualitativeExpectations?: string;
+}
+
+/**
+ * Дифференцирующие критерии
+ * Что отличает ИДЕАЛЬНОГО кандидата от просто подходящего
+ */
+export interface Differentiators {
+  /** Требуемая отраслевая экспертиза */
+  industryExpertise?: IndustryExpertise;
+  /** Знание специфических доменов */
+  domainKnowledge?: string[];
+  /** Опыт работы с определённым масштабом */
+  scaleExperience?: ScaleExperience;
+  /** Конкретные достижения */
+  achievementMarkers?: AchievementMarker[];
+  /** Предпочтительный бэкграунд */
+  companyBackground?: CompanyBackground;
+  /** Ценность нетворка */
+  networkValue?: string;
+  /** Культурные маркеры */
+  culturalFit?: CulturalFit;
+}
+
+/**
+ * Критические отсечки (Dealbreakers)
+ * Чёткие критерии отсечения кандидатов
+ */
+export interface Dealbreakers {
+  /** Абсолютные требования */
+  absoluteRequirements?: AbsoluteRequirement[];
+  /** Минимальные пороги опыта */
+  experienceMinimums?: ExperienceMinimums;
+  /** Что точно НЕ подходит */
+  redFlags?: string[];
+  /** Политика по конкурентам */
+  competitorPolicy?: CompetitorPolicyInfo;
+  /** Требования, которые не обсуждаются */
+  nonNegotiables?: string[];
+}
+
+/**
+ * Оценка сложности поиска
+ * Автоматически рассчитываемая оценка сложности закрытия позиции
+ */
+export interface SearchDifficulty {
+  /** Редкость специалиста на рынке */
+  marketRarity?: MarketRarity;
+  /** Примерный размер пула кандидатов */
+  estimatedPool?: string;
+  /** Уровень конкуренции */
+  competitionLevel?: CompetitionLevel;
+  /** Конкурентоспособность зарплаты */
+  salaryCompetitiveness?: SalaryCompetitiveness;
+  /** Рекомендуемая стратегия поиска */
+  recommendedStrategy?: string;
+  /** Примерная оценка времени закрытия */
+  timeToHireEstimate?: string;
+  /** Факторы риска */
+  riskFactors?: string[];
 }
 
 /**
@@ -388,7 +691,7 @@ export interface VacancyMetadata {
 
 /**
  * Полная структура входных параметров вакансии
- * Рассчитана на поиск редких и узкоспециализированных специалистов
+ * Рассчитана на Executive Search - поиск редких и узкоспециализированных специалистов
  */
 export interface VacancyInput {
   /** Ядро вакансии (обязательный блок) */
@@ -405,6 +708,17 @@ export interface VacancyInput {
   responsibilities?: VacancyResponsibilities;
   /** Организационная структура */
   orgStructure?: VacancyOrgStructure;
+  // ============ EXECUTIVE SEARCH БЛОКИ ============
+  /** Контекст найма (КРИТИЧНО для executive search) */
+  hiringContext?: HiringContext;
+  /** Критерии успеха и KPI */
+  successCriteria?: SuccessCriteria;
+  /** Дифференцирующие критерии (что отличает идеального кандидата) */
+  differentiators?: Differentiators;
+  /** Критические отсечки */
+  dealbreakers?: Dealbreakers;
+  /** Оценка сложности поиска (авто-расчёт) */
+  searchDifficulty?: SearchDifficulty;
   /** Полный текст вакансии */
   fullText?: VacancyFullText;
   /** Метаданные */
