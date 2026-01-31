@@ -72,6 +72,10 @@ export interface BatchAnswerResponse {
   is_complete: boolean;
 }
 
+export interface CalculateWeightsResponse {
+  weights: Record<string, number>;  // баллы 0-10 для каждой категории
+}
+
 /**
  * Создать новую сессию для создания вакансии.
  */
@@ -163,5 +167,18 @@ export async function batchSubmitAnswers(
   return apiClient.post<BatchAnswerResponse>(
     `/v1/vacancy/session/${sessionId}/enrichment/batch-answer`,
     { answers }
+  );
+}
+
+/**
+ * Рассчитать веса критериев отбора для вакансии через LLM.
+ * Вызывается при переходе на EditStep после завершения ChatStep.
+ */
+export async function calculateWeights(
+  sessionId: string
+): Promise<CalculateWeightsResponse> {
+  return apiClient.post<CalculateWeightsResponse>(
+    `/v1/vacancy/session/${sessionId}/calculate-weights`,
+    {}
   );
 }

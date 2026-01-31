@@ -1,3 +1,4 @@
 PROJECT.MD
 .gitignore
 .env
+frontend/node_modules/

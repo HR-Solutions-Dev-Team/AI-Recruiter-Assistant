@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X } from 'lucide-react';
 import Breadcrumbs from '../components/Breadcrumbs';
 import StepIndicator from '../components/vacancy/StepIndicator';
 import UploadStep from '../components/vacancy/UploadStep';
 import ChatStep from '../components/vacancy/ChatStep';
-import EditStep from '../components/vacancy/EditStep';
+import EditStep, { DEFAULT_WEIGHTS, type CriteriaWeights } from '../components/vacancy/EditStep';
 import PreviewStep from '../components/vacancy/PreviewStep';
+import { calculateWeights } from '../api/vacancy';
 import type { VacancyInput } from '../types/vacancy';
 
 const STEPS = [
@@ -30,6 +31,40 @@ export default function VacancyCreate() {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [completionPercent, setCompletionPercent] = useState(0);
+  
+  // Веса критериев
+  const [criteriaWeights, setCriteriaWeights] = useState<CriteriaWeights>(DEFAULT_WEIGHTS);
+  const [isCalculatingWeights, setIsCalculatingWeights] = useState(false);
+  const weightsCalculatedRef = useRef(false);
+
+  // Функция расчёта весов через API
+  const fetchWeights = useCallback(async () => {
+    if (!sessionId) return;
+    
+    setIsCalculatingWeights(true);
+    try {
+      const result = await calculateWeights(sessionId);
+      setCriteriaWeights(result.weights as CriteriaWeights);
+    } catch (error) {
+      console.error('Failed to calculate weights:', error);
+      // Оставляем дефолтные веса в случае ошибки
+    } finally {
+      setIsCalculatingWeights(false);
+    }
+  }, [sessionId]);
+
+  // Автоматический расчёт весов при переходе на шаг 3 (EditStep)
+  useEffect(() => {
+    if (currentStep === 3 && sessionId && !weightsCalculatedRef.current) {
+      weightsCalculatedRef.current = true;
+      fetchWeights();
+    }
+  }, [currentStep, sessionId, fetchWeights]);
+
+  // Обработчик пересчёта весов вручную
+  const handleRecalculateWeights = useCallback(() => {
+    fetchWeights();
+  }, [fetchWeights]);
 
   const handleNextStep = () => {
     if (currentStep < 4) {
@@ -118,6 +153,10 @@ export default function VacancyCreate() {
             setVacancyData={setVacancyData}
             completionPercent={completionPercent}
             setCompletionPercent={setCompletionPercent}
+            criteriaWeights={criteriaWeights}
+            setCriteriaWeights={setCriteriaWeights}
+            isCalculatingWeights={isCalculatingWeights}
+            onRecalculateWeights={handleRecalculateWeights}
           />
         )}
         {currentStep === 4 && (

@@ -1,19 +1,11 @@
-import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, ArrowRight, Plus, Trash2, Check, Sparkles } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { ChevronDown, ChevronRight, ArrowRight, Plus, Trash2, Check, Sparkles, Scale, Loader2, RotateCcw } from 'lucide-react';
 import type {
   VacancyInput, Skill, Language,
   OnboardingMilestone, ShortTermKPI, AchievementMarker, AbsoluteRequirement
 } from '../../types/vacancy';
 
-interface EditStepProps {
-  onNext: () => void;
-  vacancyData: VacancyInput;
-  setVacancyData: React.Dispatch<React.SetStateAction<VacancyInput>>;
-  completionPercent: number;
-  setCompletionPercent: React.Dispatch<React.SetStateAction<number>>;
-}
-
-type SectionKey =
+export type SectionKey =
   | 'core'
   | 'company'
   | 'workConditions'
@@ -24,6 +16,21 @@ type SectionKey =
   | 'successCriteria'
   | 'differentiators'
   | 'dealbreakers';
+
+export type CriteriaWeights = Record<SectionKey, number>;
+
+interface EditStepProps {
+  onNext: () => void;
+  vacancyData: VacancyInput;
+  setVacancyData: React.Dispatch<React.SetStateAction<VacancyInput>>;
+  completionPercent: number;
+  setCompletionPercent: React.Dispatch<React.SetStateAction<number>>;
+  // Веса критериев
+  criteriaWeights: CriteriaWeights;
+  setCriteriaWeights: React.Dispatch<React.SetStateAction<CriteriaWeights>>;
+  isCalculatingWeights: boolean;
+  onRecalculateWeights: () => void;
+}
 
 interface SectionConfig {
   key: SectionKey;
@@ -181,65 +188,56 @@ const COMPANY_STAGES: { value: string; label: string }[] = [
   { value: 'm_and_a', label: 'M&A' },
 ];
 
-// Функция расчёта динамических весов на основе контекста вакансии
-const calculateDynamicWeights = (vacancy: VacancyInput): Record<SectionKey, number> => {
-  const weights: Record<SectionKey, number> = {
-    core: 20,
-    company: 10,
-    workConditions: 15,
-    requirements: 20,
-    responsibilities: 10,
-    hiringContext: 10,
-    successCriteria: 5,
-    differentiators: 5,
-    dealbreakers: 5,
-  };
+// Дефолтные веса (баллы 0-10, используются до расчёта через LLM)
+export const DEFAULT_WEIGHTS: CriteriaWeights = {
+  core: 6,
+  company: 5,
+  workConditions: 5,
+  requirements: 6,
+  responsibilities: 5,
+  hiringContext: 5,
+  successCriteria: 5,
+  differentiators: 5,
+  dealbreakers: 5,
+};
 
-  const jobTitle = vacancy.core?.jobTitle?.toLowerCase() || '';
-  const careerLevel = vacancy.core?.careerLevel?.code || '';
-  const remote = vacancy.workConditions?.location?.remote;
-
-  // IT/Tech роли: локация менее важна, навыки важнее
-  const isITRole = /developer|программист|devops|data|analyst|аналитик|engineer|инженер|frontend|backend|fullstack|qa|тестировщик|ml|ai|architect|архитектор/.test(jobTitle);
-  if (isITRole) {
-    weights.workConditions = 10;
-    weights.requirements = 25;
+// Функция расчёта процентов из баллов
+// Если балл = 0, считаем как 1 для расчёта
+// Если все баллы = 0, равное распределение по ~11%
+export const calculatePercentFromScores = (weights: CriteriaWeights): Record<SectionKey, number> => {
+  const keys = Object.keys(weights) as SectionKey[];
+  
+  // Преобразуем 0 в 1 для расчёта
+  const effectiveWeights = keys.map(k => weights[k] === 0 ? 1 : weights[k]);
+  const total = effectiveWeights.reduce((a, b) => a + b, 0);
+  
+  // Если всё по 1 (все были 0), то равное распределение
+  if (total === keys.length) {
+    const equalPercent = Math.floor(100 / keys.length);
+    const result: Record<string, number> = {};
+    keys.forEach((k, i) => {
+      // Последняя категория получает остаток
+      result[k] = i === keys.length - 1 ? 100 - equalPercent * (keys.length - 1) : equalPercent;
+    });
+    return result as Record<SectionKey, number>;
   }
-
-  // Удалённая работа: локация ещё менее важна
-  if (remote === 'remote') {
-    weights.workConditions = Math.max(weights.workConditions - 5, 5);
-    weights.requirements += 5;
-  }
-
-  // Senior/Lead/Director: Executive Search блоки важнее
-  const isSeniorRole = ['senior', 'lead', 'head', 'director', 'c-level'].includes(careerLevel);
-  if (isSeniorRole) {
-    weights.hiringContext = 15;
-    weights.successCriteria = 10;
-    weights.differentiators = 10;
-    weights.dealbreakers = 10;
-    // Уменьшаем базовые
-    weights.core = 15;
-    weights.company = 5;
-    weights.workConditions = 10;
-  }
-
-  // Sales/Business роли: компания и условия важнее
-  const isSalesRole = /sales|продажи|account|business development|bd|коммерческий/.test(jobTitle);
-  if (isSalesRole) {
-    weights.company = 15;
-    weights.workConditions = 20;
-    weights.requirements = 15;
-  }
-
-  // Нормализуем веса до 100%
-  const total = Object.values(weights).reduce((a, b) => a + b, 0);
-  for (const key of Object.keys(weights) as SectionKey[]) {
-    weights[key] = Math.round((weights[key] / total) * 100);
-  }
-
-  return weights;
+  
+  // Обычный расчёт процентов
+  const percents: Record<string, number> = {};
+  let sum = 0;
+  keys.forEach((k, i) => {
+    const effectiveWeight = weights[k] === 0 ? 1 : weights[k];
+    if (i === keys.length - 1) {
+      // Последняя категория получает остаток для точности 100%
+      percents[k] = 100 - sum;
+    } else {
+      const percent = Math.round((effectiveWeight / total) * 100);
+      percents[k] = percent;
+      sum += percent;
+    }
+  });
+  
+  return percents as Record<SectionKey, number>;
 };
 
 export default function EditStep({
@@ -247,12 +245,25 @@ export default function EditStep({
   vacancyData,
   setVacancyData,
   completionPercent,
-  setCompletionPercent
+  setCompletionPercent,
+  criteriaWeights,
+  setCriteriaWeights,
+  isCalculatingWeights,
+  onRecalculateWeights,
 }: EditStepProps) {
   const [openSection, setOpenSection] = useState<SectionKey | null>('core');
+  const [showWeightsPanel, setShowWeightsPanel] = useState(true);
 
-  // Динамические веса на основе контекста
-  const dynamicWeights = useMemo(() => calculateDynamicWeights(vacancyData), [vacancyData]);
+  // Проценты, рассчитанные из баллов
+  const weightPercents = useMemo(() => calculatePercentFromScores(criteriaWeights), [criteriaWeights]);
+
+  // Обработчик изменения балла категории (0-10)
+  const handleWeightChange = useCallback((key: SectionKey, newValue: number) => {
+    setCriteriaWeights(prev => ({
+      ...prev,
+      [key]: Math.max(0, Math.min(10, newValue)),
+    }));
+  }, [setCriteriaWeights]);
 
   const toggleSection = (key: SectionKey) => {
     setOpenSection(openSection === key ? null : key);
@@ -1129,7 +1140,7 @@ export default function EditStep({
   const renderSectionItem = (section: SectionConfig) => {
     const isOpen = openSection === section.key;
     const sectionCompletion = getSectionCompletion(section.key);
-    const weight = dynamicWeights[section.key];
+    const weightPercent = weightPercents[section.key];
 
     return (
       <div
@@ -1165,7 +1176,7 @@ export default function EditStep({
           <div className="flex items-center gap-3">
             <div className="text-right mr-2">
               <span className="text-[10px] text-gray-400">вес</span>
-              <span className="block text-xs font-medium text-gray-600">{weight}%</span>
+              <span className="block text-xs font-medium text-gray-600">{weightPercent}%</span>
             </div>
             <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
               <div
@@ -1186,6 +1197,85 @@ export default function EditStep({
     );
   };
 
+  // Рендер кастомного слайдера для одной категории весов (0-10)
+  const renderWeightSlider = (key: SectionKey, title: string, isExecutive: boolean = false) => {
+    const score = criteriaWeights[key];
+    const fillColor = isExecutive ? 'bg-amber-500' : 'bg-gray-900';
+    const fillPercent = (score / 10) * 100;
+    
+    return (
+      <div key={key} className="flex items-center gap-3 py-2">
+        <div className="w-36 flex items-center gap-2">
+          <span className={`text-sm ${isExecutive ? 'text-amber-700' : 'text-gray-700'}`}>
+            {title}
+          </span>
+          {isExecutive && (
+            <span className="px-1 py-0.5 text-[8px] font-medium bg-amber-100 text-amber-600 rounded">
+              ES
+            </span>
+          )}
+        </div>
+        
+        {/* Кастомный слайдер с рисками */}
+        <div className="flex-1 relative">
+          {/* Серая линия с рисками */}
+          <div className="relative h-6 flex items-center">
+            {/* Основная линия (серая) */}
+            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1.5 bg-gray-200 rounded-full" />
+            
+            {/* Цветное заполнение */}
+            <div 
+              className={`absolute left-0 top-1/2 -translate-y-1/2 h-1.5 ${fillColor} rounded-full transition-all duration-150`}
+              style={{ width: `${fillPercent}%` }}
+            />
+            
+            {/* Риски (0-10) */}
+            <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 flex justify-between px-0">
+              {Array.from({ length: 11 }, (_, i) => (
+                <div
+                  key={i}
+                  className={`w-0.5 ${i === 0 || i === 10 ? 'h-3' : 'h-2'} ${
+                    i <= score ? (isExecutive ? 'bg-amber-400' : 'bg-gray-600') : 'bg-gray-300'
+                  } rounded-full`}
+                />
+              ))}
+            </div>
+            
+            {/* Невидимый input для управления */}
+            <input
+              type="range"
+              min={0}
+              max={10}
+              step={1}
+              value={score}
+              onChange={(e) => handleWeightChange(key, parseInt(e.target.value))}
+              disabled={isCalculatingWeights}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+            />
+            
+            {/* Ползунок (точка) */}
+            <div 
+              className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 ${fillColor} rounded-full shadow-md
+                         border-2 border-white transition-all duration-150
+                         ${isCalculatingWeights ? 'opacity-50' : ''}`}
+              style={{ left: `calc(${fillPercent}% - 8px)` }}
+            />
+          </div>
+        </div>
+        
+        {/* Балл справа */}
+        <div className="w-8 text-right">
+          <span className={`text-sm font-bold ${isExecutive ? 'text-amber-700' : 'text-gray-900'}`}>
+            {score}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
+  // Сумма всех баллов (для отображения)
+  const totalScores = Object.values(criteriaWeights).reduce((a, b) => a + b, 0);
+
   return (
     <div className="max-w-3xl mx-auto">
       {/* Progress Bar */}
@@ -1200,6 +1290,85 @@ export default function EditStep({
             style={{ width: `${completionPercent}%` }}
           />
         </div>
+      </div>
+
+      {/* Weights Panel */}
+      <div className="mb-6 bg-white border border-gray-200 rounded-xl overflow-hidden">
+        <button
+          onClick={() => setShowWeightsPanel(!showWeightsPanel)}
+          className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Scale size={20} className="text-gray-500" />
+            <div className="text-left">
+              <h3 className="text-sm font-medium text-gray-900">Приоритеты критериев отбора</h3>
+              <p className="text-xs text-gray-500">
+                {isCalculatingWeights 
+                  ? 'Рассчитываем приоритеты...' 
+                  : 'Оцените важность каждой категории от 0 до 10'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {isCalculatingWeights && (
+              <Loader2 size={18} className="animate-spin text-gray-400" />
+            )}
+            <span className="text-sm font-medium text-gray-600">
+              {totalScores} баллов
+            </span>
+            {showWeightsPanel ? (
+              <ChevronDown size={20} className="text-gray-400" />
+            ) : (
+              <ChevronRight size={20} className="text-gray-400" />
+            )}
+          </div>
+        </button>
+
+        {showWeightsPanel && (
+          <div className="px-4 pb-4 pt-2 border-t border-gray-100">
+            {/* Базовые категории */}
+            <div className="mb-3">
+              {renderWeightSlider('core', 'Позиция')}
+              {renderWeightSlider('company', 'Компания')}
+              {renderWeightSlider('workConditions', 'Условия')}
+              {renderWeightSlider('requirements', 'Требования')}
+              {renderWeightSlider('responsibilities', 'Обязанности')}
+            </div>
+
+            {/* Разделитель Executive Search */}
+            <div className="flex items-center gap-2 my-3">
+              <div className="flex-1 h-px bg-amber-200" />
+              <span className="text-[10px] font-medium text-amber-600 uppercase">Executive Search</span>
+              <div className="flex-1 h-px bg-amber-200" />
+            </div>
+
+            {/* Executive Search категории */}
+            <div className="mb-3">
+              {renderWeightSlider('hiringContext', 'Контекст найма', true)}
+              {renderWeightSlider('successCriteria', 'Критерии успеха', true)}
+              {renderWeightSlider('differentiators', 'Идеальный кандидат', true)}
+              {renderWeightSlider('dealbreakers', 'Критические треб.', true)}
+            </div>
+
+            {/* Кнопка пересчёта */}
+            <div className="flex justify-end pt-2 border-t border-gray-100">
+              <button
+                onClick={onRecalculateWeights}
+                disabled={isCalculatingWeights}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-gray-600
+                           hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors
+                           disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isCalculatingWeights ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <RotateCcw size={14} />
+                )}
+                Пересчитать через AI
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Base Sections */}

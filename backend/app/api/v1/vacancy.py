@@ -13,6 +13,7 @@ from app.services.enrichment_service import enrichment_service
 from app.services.file_parser import FileParserError, file_parser_service
 from app.services.session import SessionService, SessionStatus, VacancySession
 from app.services.vacancy_parser import vacancy_parser_service
+from app.services.weights_service import weights_service
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,12 @@ class BatchAnswerResponse(BaseModel):
     # Буфер вопросов - до 3 независимых вопросов за раз
     next_questions: list[EnrichmentQuestionResponse] = []
     is_complete: bool = False
+
+
+class CalculateWeightsResponse(BaseModel):
+    """Ответ с рассчитанными весами критериев (баллы 0-10)."""
+
+    weights: dict[str, int]  # баллы 0-10 для каждой категории
 
 
 # ============ Helper Functions ============
@@ -625,3 +632,49 @@ async def delete_session(
         )
 
     return {"status": "deleted"}
+
+
+@router.post("/session/{session_id}/calculate-weights", response_model=CalculateWeightsResponse)
+async def calculate_criteria_weights(
+    session_id: str,
+    user_id: CurrentUserId,
+    redis: Redis,
+) -> CalculateWeightsResponse:
+    """
+    Рассчитывает веса критериев отбора для вакансии через LLM.
+
+    Анализирует данные вакансии и определяет приоритеты категорий
+    на основе типа позиции, уровня, отрасли и других факторов.
+
+    Используется при переходе на страницу редактирования (EditStep)
+    после завершения обогащения вакансии (ChatStep).
+    """
+    session = await session_service.get_session(session_id, user_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    if not session.parsed_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session has no parsed data",
+        )
+
+    try:
+        result = await weights_service.calculate_weights(
+            vacancy_data=session.parsed_data,
+        )
+
+        return CalculateWeightsResponse(
+            weights=result.weights,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to calculate weights: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to calculate weights: {str(e)}",
+        )
