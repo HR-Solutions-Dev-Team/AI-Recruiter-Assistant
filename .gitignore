@@ -1,4 +1,27 @@
 PROJECT.MD
-.gitignore
+
+# Environment files (содержат секреты)
 .env
+*.env
+backend/.env
+!*.env.example
+!*.env.production.example
+
+# Dependencies
 frontend/node_modules/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Docker volumes
+redis_data/
+
+# Logs
+*.log
+logs/

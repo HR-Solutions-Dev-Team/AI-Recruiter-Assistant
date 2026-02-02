@@ -23,6 +23,8 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
     depends_on:
       redis:
         condition: service_healthy
@@ -38,8 +40,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    # Порт закрыт для внешнего доступа - только внутренняя сеть
     volumes:
       - redis_data:/data
     networks:
@@ -51,6 +52,24 @@ services:
       timeout: 5s
       retries: 5
     command: redis-server --appendonly yes
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.core.celery_app worker --loglevel=info -Q matching
+    env_file:
+      - ./backend/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
 
 networks:
   app-network:
