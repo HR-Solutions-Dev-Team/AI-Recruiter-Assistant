@@ -166,10 +166,27 @@ class ApiClient {
   private getClientId(): string {
     let clientId = localStorage.getItem('client_id');
     if (!clientId) {
-      clientId = crypto.randomUUID();
+      clientId = this.generateUUID();
       localStorage.setItem('client_id', clientId);
     }
     return clientId;
+  }
+
+  /**
+   * Генерация UUID с fallback для HTTP (не-secure) контекста
+   */
+  private generateUUID(): string {
+    // Используем crypto.randomUUID если доступен (HTTPS/localhost)
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    
+    // Fallback для HTTP контекста
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
   }
 }
 
