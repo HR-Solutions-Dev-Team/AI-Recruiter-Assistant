@@ -3,6 +3,7 @@ import MainLayout from './layouts/MainLayout';
 import Home from './pages/Home';
 import Vacancy from './pages/Vacancy';
 import VacancyCreate from './pages/VacancyCreate';
+import VacancyDetail from './pages/VacancyDetail';
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
           <Route path="home" element={<Home />} />
           <Route path="vacancy" element={<Vacancy />} />
           <Route path="vacancy/create" element={<VacancyCreate />} />
+          <Route path="vacancy/:id" element={<VacancyDetail />} />
         </Route>
       </Routes>
     </BrowserRouter>
