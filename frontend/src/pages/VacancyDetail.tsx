@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
 import { 
   Users, 
   FileText, 
@@ -15,26 +15,38 @@ import {
   Target,
   ShieldAlert,
   Award,
-  Network
+  Network,
+  MessageCircleQuestion,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import Breadcrumbs from '../components/Breadcrumbs';
 import { getVacancy } from '../api/vacancy';
-
-// Mock data for candidates
-const MOCK_CANDIDATES = [
-  { id: 1, name: 'Александр Иванов', position: 'Frontend Developer', status: 'New', date: '2024-03-15' },
-  { id: 2, name: 'Мария Петрова', position: 'Frontend Developer', status: 'Review', date: '2024-03-14' },
-  { id: 3, name: 'Дмитрий Сидоров', position: 'Frontend Developer', status: 'Rejected', date: '2024-03-12' },
-];
+import { uploadResume, getVacancyCandidates, CandidateMatch } from '../api/resume';
 
 export default function VacancyDetail() {
   const { id } = useParams();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<'vacancy' | 'candidates'>('vacancy');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [vacancy, setVacancy] = useState<any | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // Candidates state
+  const [candidates, setCandidates] = useState<CandidateMatch[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
+  
+  // Upload state
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Expanded candidate cards
+  const [expandedCandidates, setExpandedCandidates] = useState<Set<number>>(new Set());
   
   // Accordion states
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -56,6 +68,33 @@ export default function VacancyDetail() {
     }));
   };
 
+  const toggleCandidateExpanded = (resumeId: number) => {
+    setExpandedCandidates(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(resumeId)) {
+        newSet.delete(resumeId);
+      } else {
+        newSet.add(resumeId);
+      }
+      return newSet;
+    });
+  };
+
+  const loadCandidates = useCallback(async () => {
+    if (!id) return;
+    setCandidatesLoading(true);
+    setCandidatesError(null);
+    try {
+      const response = await getVacancyCandidates(parseInt(id), 0, 100);
+      setCandidates(response.candidates);
+    } catch (error) {
+      console.error('Failed to load candidates', error);
+      setCandidatesError('Не удалось загрузить кандидатов');
+    } finally {
+      setCandidatesLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     const loadVacancy = async () => {
       if (!id) return;
@@ -70,6 +109,72 @@ export default function VacancyDetail() {
     };
     loadVacancy();
   }, [id]);
+
+  // Load candidates when switching to candidates tab
+  useEffect(() => {
+    if (activeTab === 'candidates' && candidates.length === 0 && !candidatesLoading) {
+      loadCandidates();
+    }
+  }, [activeTab, candidates.length, candidatesLoading, loadCandidates]);
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setUploadMessage(null);
+    setUploadError(null);
+
+    try {
+      const result = await uploadResume(file);
+      setUploadMessage(`Резюме "${result.candidateName || 'Кандидат'}" загружено. Выполняется анализ...`);
+      
+      // Reload candidates after a delay (give time for background processing)
+      setTimeout(() => {
+        loadCandidates();
+        setUploadMessage(null);
+      }, 3000);
+    } catch (error) {
+      console.error('Failed to upload resume', error);
+      setUploadError('Не удалось загрузить резюме. Попробуйте ещё раз.');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDropZoneClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    const file = event.dataTransfer.files?.[0];
+    if (file && fileInputRef.current) {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.items.add(file);
+      fileInputRef.current.files = dataTransfer.files;
+      fileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
+
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 70) return 'text-green-600 bg-green-50 border-green-200';
+    if (score >= 50) return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+    return 'text-red-600 bg-red-50 border-red-200';
+  };
+
+  const getScoreLabel = (score: number) => {
+    if (score >= 70) return 'Высокое соответствие';
+    if (score >= 50) return 'Среднее соответствие';
+    return 'Низкое соответствие';
+  };
 
   if (isLoading) {
     return (
@@ -95,7 +200,7 @@ export default function VacancyDetail() {
   
   const descriptionText = vacancy.fullText?.text || 'Описание отсутствует';
   
-  // Renders
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const renderCompanyDetails = () => {
     const comp = vacancy.company;
     if (!comp) return <div className="text-gray-500">Информация о компании не указана</div>;
@@ -109,6 +214,7 @@ export default function VacancyDetail() {
           <div>
             <strong>Ссылки:</strong>
             <ul className="list-disc list-inside ml-2">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {comp.publicLinks.map((link: any, i: number) => (
                 <li key={i}><a href={link.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{link.type}: {link.url}</a></li>
               ))}
@@ -165,6 +271,7 @@ export default function VacancyDetail() {
           <div>
             <strong>Навыки:</strong>
             <div className="flex flex-wrap gap-2 mt-2">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {skills.map((skill: any, idx: number) => (
                 <span key={idx} className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-sm border border-gray-200">
                   {skill.name} {skill.level ? `(${skill.level})` : ''}
@@ -185,6 +292,7 @@ export default function VacancyDetail() {
           <div>
             <strong>Языки:</strong>
             <ul className="list-disc list-inside ml-2">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {langs.map((l: any, i: number) => (
                 <li key={i}>{l.name} - {l.proficiency}</li>
               ))}
@@ -216,6 +324,7 @@ export default function VacancyDetail() {
           <div className="mt-2">
             <strong>Критические задачи (первые 90 дней):</strong>
             <ul className="list-disc list-inside ml-2 mt-1">
+               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                {resp.criticalTasks.map((t: any, i: number) => (
                  <li key={i}>{t.task} (срок: {t.deadline})</li>
                ))}
@@ -279,6 +388,7 @@ export default function VacancyDetail() {
           <div>
             <strong>KPI (6 мес):</strong>
             <ul className="list-disc list-inside ml-2">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {criteria.shortTermKPIs.map((kpi: any, i: number) => (
                 <li key={i}>{kpi.metric}: {kpi.targetValue}</li>
               ))}
@@ -289,6 +399,7 @@ export default function VacancyDetail() {
           <div>
             <strong>Milestones (Onboarding):</strong>
             <ul className="list-disc list-inside ml-2">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {criteria.onboardingMilestones.map((m: any, i: number) => (
                 <li key={i}>{m.milestone} ({m.timeframe})</li>
               ))}
@@ -324,6 +435,7 @@ export default function VacancyDetail() {
             <h4 className="font-semibold text-red-800 mb-2">Стоп-факторы (Dealbreakers)</h4>
              {deals.absoluteRequirements && (
                <ul className="list-disc list-inside text-red-700">
+                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                  {deals.absoluteRequirements.map((r: any, i: number) => (
                    <li key={i}>{r.requirement}</li>
                  ))}
@@ -334,6 +446,119 @@ export default function VacancyDetail() {
                  Red Flags: {deals.redFlags.join(', ')}
                </div>
              )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderCandidateCard = (candidate: CandidateMatch) => {
+    const isExpanded = expandedCandidates.has(candidate.resumeId);
+    const candidateName = [candidate.firstName, candidate.lastName].filter(Boolean).join(' ') || 'Без имени';
+    
+    return (
+      <div key={candidate.resumeId} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all hover:shadow-md">
+        {/* Header */}
+        <div 
+          className="p-4 cursor-pointer"
+          onClick={() => toggleCandidateExpanded(candidate.resumeId)}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center text-blue-600 font-semibold text-lg">
+                {candidateName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="font-semibold text-gray-900">{candidateName}</div>
+                <div className="text-sm text-gray-500">{candidate.desiredPosition || 'Должность не указана'}</div>
+                {candidate.city && (
+                  <div className="text-xs text-gray-400 flex items-center gap-1 mt-0.5">
+                    <MapPin size={12} />
+                    {candidate.city}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              {/* Score badge */}
+              <div className={`px-4 py-2 rounded-xl border font-semibold ${getScoreColor(candidate.matchScore)}`}>
+                <div className="text-2xl">{Math.round(candidate.matchScore)}%</div>
+                <div className="text-xs font-normal">{getScoreLabel(candidate.matchScore)}</div>
+              </div>
+              <div className={`p-2 rounded-full bg-gray-50 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}>
+                <ChevronDown size={20} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Expanded content */}
+        {isExpanded && (
+          <div className="border-t border-gray-100 p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
+            {/* Contact info */}
+            <div className="flex gap-4 text-sm">
+              {candidate.email && (
+                <a href={`mailto:${candidate.email}`} className="text-blue-600 hover:underline">
+                  {candidate.email}
+                </a>
+              )}
+              {candidate.phone && (
+                <a href={`tel:${candidate.phone}`} className="text-blue-600 hover:underline">
+                  {candidate.phone}
+                </a>
+              )}
+            </div>
+
+            {/* Strengths */}
+            {candidate.strengthsSummary.length > 0 && (
+              <div className="bg-green-50 rounded-xl p-4 border border-green-100">
+                <h4 className="font-semibold text-green-800 flex items-center gap-2 mb-2">
+                  <CheckCircle2 size={18} />
+                  Сильные стороны
+                </h4>
+                <ul className="space-y-1">
+                  {candidate.strengthsSummary.map((item, idx) => (
+                    <li key={idx} className="text-green-700 text-sm flex items-start gap-2">
+                      <TrendingUp size={14} className="mt-0.5 flex-shrink-0" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Gaps */}
+            {candidate.gapsSummary.length > 0 && (
+              <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
+                <h4 className="font-semibold text-yellow-800 flex items-center gap-2 mb-2">
+                  <AlertCircle size={18} />
+                  Возможные пробелы
+                </h4>
+                <ul className="space-y-1">
+                  {candidate.gapsSummary.map((item, idx) => (
+                    <li key={idx} className="text-yellow-700 text-sm">{item}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Interview questions */}
+            {candidate.interviewQuestions.length > 0 && (
+              <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                <h4 className="font-semibold text-blue-800 flex items-center gap-2 mb-3">
+                  <MessageCircleQuestion size={18} />
+                  Вопросы для собеседования
+                </h4>
+                <div className="space-y-3">
+                  {candidate.interviewQuestions.map((q, idx) => (
+                    <div key={idx} className="bg-white rounded-lg p-3 border border-blue-100">
+                      <div className="text-xs text-blue-500 font-medium mb-1">{q.topic}</div>
+                      <div className="text-gray-800">{q.question}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -406,9 +631,11 @@ export default function VacancyDetail() {
           <div className="flex items-center gap-2">
             <Users size={18} />
             Кандидаты
-            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-              {MOCK_CANDIDATES.length}
-            </span>
+            {candidates.length > 0 && (
+              <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold">
+                {candidates.length}
+              </span>
+            )}
           </div>
           {activeTab === 'candidates' && (
             <div className="absolute bottom-0 left-0 w-full h-0.5 bg-gray-900 rounded-t-full" />
@@ -596,46 +823,101 @@ export default function VacancyDetail() {
           ) : (
             <div className="space-y-6">
               {/* Upload Zone */}
-              <div className="bg-white border-2 border-dashed border-gray-200 rounded-2xl p-8 text-center hover:border-gray-400 transition-colors cursor-pointer group">
-                <div className="w-16 h-16 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
-                  <Upload size={28} />
+              <div 
+                onClick={handleDropZoneClick}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                className={`bg-white border-2 border-dashed rounded-2xl p-8 text-center transition-all cursor-pointer group ${
+                  isUploading 
+                    ? 'border-blue-400 bg-blue-50' 
+                    : 'border-gray-200 hover:border-blue-400 hover:bg-blue-50/50'
+                }`}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,.doc,.txt"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+                
+                <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 transition-all ${
+                  isUploading 
+                    ? 'bg-blue-100 text-blue-600 animate-pulse' 
+                    : 'bg-blue-50 text-blue-500 group-hover:scale-110'
+                }`}>
+                  {isUploading ? <Loader2 size={28} className="animate-spin" /> : <Upload size={28} />}
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900">Загрузить резюме</h3>
+                
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {isUploading ? 'Загрузка...' : 'Загрузить резюме'}
+                </h3>
                 <p className="text-gray-500 mt-1 max-w-sm mx-auto">
-                  Перетащите файлы сюда или кликните для выбора. Поддерживаются PDF, DOCX
+                  {isUploading 
+                    ? 'Обработка файла и анализ резюме...' 
+                    : 'Перетащите файл сюда или кликните для выбора. Поддерживаются PDF, DOCX'}
                 </p>
+                
+                {uploadMessage && (
+                  <div className="mt-4 p-3 bg-green-50 text-green-700 rounded-lg flex items-center justify-center gap-2">
+                    <CheckCircle2 size={18} />
+                    {uploadMessage}
+                  </div>
+                )}
+                
+                {uploadError && (
+                  <div className="mt-4 p-3 bg-red-50 text-red-700 rounded-lg flex items-center justify-center gap-2">
+                    <AlertCircle size={18} />
+                    {uploadError}
+                  </div>
+                )}
               </div>
 
-              {/* Candidates List */}
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div className="p-6 border-b border-gray-100">
-                  <h3 className="text-lg font-semibold text-gray-900">Список кандидатов</h3>
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {MOCK_CANDIDATES.map((candidate) => (
-                    <div key={candidate.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors group cursor-pointer">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-500 font-medium group-hover:bg-white group-hover:shadow-sm transition-all">
-                          {candidate.name.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="font-medium text-gray-900">{candidate.name}</div>
-                          <div className="text-sm text-gray-500">{candidate.position}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <span className="text-sm text-gray-400">{candidate.date}</span>
-                        <div className={`px-3 py-1 rounded-full text-xs font-medium 
-                          ${candidate.status === 'New' ? 'bg-blue-50 text-blue-700' : 
-                            candidate.status === 'Review' ? 'bg-yellow-50 text-yellow-700' :
-                            'bg-red-50 text-red-700'}`}>
-                          {candidate.status}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {/* Refresh button */}
+              <div className="flex justify-end">
+                <button
+                  onClick={loadCandidates}
+                  disabled={candidatesLoading}
+                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw size={16} className={candidatesLoading ? 'animate-spin' : ''} />
+                  Обновить список
+                </button>
               </div>
+
+              {/* Error state */}
+              {candidatesError && (
+                <div className="bg-red-50 text-red-700 p-4 rounded-xl flex items-center gap-3">
+                  <AlertCircle size={20} />
+                  {candidatesError}
+                </div>
+              )}
+
+              {/* Loading state */}
+              {candidatesLoading && (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 size={32} className="animate-spin text-gray-400" />
+                </div>
+              )}
+
+              {/* Candidates List */}
+              {!candidatesLoading && candidates.length === 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users size={28} className="text-gray-400" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Кандидатов пока нет</h3>
+                  <p className="text-gray-500">
+                    Загрузите резюме кандидатов для автоматического анализа и скоринга
+                  </p>
+                </div>
+              )}
+
+              {!candidatesLoading && candidates.length > 0 && (
+                <div className="space-y-4">
+                  {candidates.map(candidate => renderCandidateCard(candidate))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -675,6 +957,15 @@ export default function VacancyDetail() {
                   </div>
                 </div>
               </div>
+              {candidates.length > 0 && (
+                <div className="flex items-start gap-3">
+                  <Users className="text-gray-400 mt-0.5" size={18} />
+                  <div>
+                    <div className="text-sm text-gray-500">Кандидатов</div>
+                    <div className="font-medium text-gray-900">{candidates.length}</div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

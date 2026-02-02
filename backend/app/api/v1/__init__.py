@@ -2,10 +2,11 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import auth, health, vacancy
+from app.api.v1 import auth, health, resume, vacancy
 
 router = APIRouter(prefix="/v1")
 
 router.include_router(health.router, tags=["Health"])
 router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 router.include_router(vacancy.router, prefix="/vacancy", tags=["Vacancy"])
+router.include_router(resume.router, prefix="/resume", tags=["Resume"])

@@ -987,3 +987,147 @@ async def delete_vacancy(
         )
     
     return {"status": "deleted"}
+
+
+# ============ Candidates for Vacancy ============
+
+
+class CandidateMatch(BaseModel):
+    """Candidate match info for vacancy view."""
+    
+    resume_id: int = Field(..., alias="resumeId")
+    first_name: str | None = Field(None, alias="firstName")
+    last_name: str | None = Field(None, alias="lastName")
+    desired_position: str | None = Field(None, alias="desiredPosition")
+    city: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    match_score: float = Field(..., alias="matchScore")
+    interview_questions: list[dict[str, str]] = Field(default_factory=list, alias="interviewQuestions")
+    gaps_summary: list[str] = Field(default_factory=list, alias="gapsSummary")
+    strengths_summary: list[str] = Field(default_factory=list, alias="strengthsSummary")
+
+    model_config = {"populate_by_name": True}
+
+
+class VacancyCandidatesResponse(BaseModel):
+    """Response with candidates for a vacancy."""
+    
+    vacancy_id: int = Field(..., alias="vacancyId")
+    vacancy_title: str = Field(..., alias="vacancyTitle")
+    candidates: list[CandidateMatch]
+    total: int
+
+    model_config = {"populate_by_name": True}
+
+
+def _format_gaps_summary(gaps: dict[str, Any] | None) -> list[str]:
+    """Format gaps analysis into summary strings."""
+    if not gaps:
+        return []
+    
+    summary = []
+    
+    missing_skills = gaps.get("missing_skills", [])
+    required_missing = [s["skill"] for s in missing_skills if s.get("required")][:3]
+    if required_missing:
+        summary.append(f"Отсутствуют навыки: {', '.join(required_missing)}")
+    
+    exp_gaps = gaps.get("experience_gaps", [])
+    for gap in exp_gaps[:2]:
+        if gap.get("type") == "insufficient_years":
+            summary.append(f"Недостаточно опыта: {gap.get('actual', 0)} из {gap.get('required', 0)} лет")
+        elif gap.get("type") == "missing_must_have":
+            req = gap.get('requirement', '')
+            summary.append(f"Нет опыта: {req[:50]}...")
+    
+    return summary
+
+
+def _format_strengths_summary(strengths: dict[str, Any] | None) -> list[str]:
+    """Format strengths into summary strings."""
+    if not strengths:
+        return []
+    
+    summary = []
+    
+    matching = strengths.get("matching_skills", [])
+    if matching:
+        skill_names = [s["skill"] for s in matching[:5]]
+        summary.append(f"Совпадающие навыки: {', '.join(skill_names)}")
+    
+    relevant_exp = strengths.get("relevant_experience", [])
+    if relevant_exp:
+        positions = [e["position"] for e in relevant_exp[:2]]
+        summary.append(f"Релевантный опыт: {', '.join(positions)}")
+    
+    return summary
+
+
+@router.get("/{vacancy_id}/candidates", response_model=VacancyCandidatesResponse)
+async def get_vacancy_candidates(
+    vacancy_id: int,
+    user_id: CurrentUserId,
+    db: DB,
+    min_score: float = Query(0, ge=0, le=100, description="Minimum match score"),
+    limit: int = Query(50, ge=1, le=100, description="Max candidates to return"),
+) -> VacancyCandidatesResponse:
+    """
+    Get matched candidates for a vacancy.
+    
+    Returns list of resumes matched with this vacancy,
+    sorted by match score descending.
+    Includes interview questions and gap analysis for each candidate.
+    """
+    from app.repositories.resume_repository import ResumeRepository
+    
+    resume_repo = ResumeRepository(db)
+    vacancy_repo = VacancyRepository(db)
+    
+    # Get vacancy
+    vacancy = await vacancy_repo.get_by_id(vacancy_id)
+    if not vacancy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vacancy not found",
+        )
+    
+    # Get matches
+    matches = await resume_repo.get_matches_for_vacancy(
+        vacancy_id=vacancy_id,
+        min_score=min_score,
+        limit=limit,
+    )
+    
+    candidates = []
+    for item in matches:
+        match = item["match"]
+        resume = item["resume"]
+        
+        # Get contact info
+        email = None
+        phone = None
+        if resume.contacts:
+            email = resume.contacts.email
+            phone = resume.contacts.phone
+        
+        candidates.append(CandidateMatch(
+            resume_id=resume.id,
+            first_name=resume.first_name,
+            last_name=resume.last_name,
+            desired_position=resume.desired_position,
+            city=resume.city,
+            email=email,
+            phone=phone,
+            match_score=float(match.match_score),
+            interview_questions=match.interview_questions or [],
+            gaps_summary=_format_gaps_summary(match.gaps_analysis),
+            strengths_summary=_format_strengths_summary(match.strengths),
+        ))
+    
+    return VacancyCandidatesResponse(
+        vacancy_id=vacancy_id,
+        vacancy_title=vacancy.job_title,
+        candidates=candidates,
+        total=len(candidates),
+    )

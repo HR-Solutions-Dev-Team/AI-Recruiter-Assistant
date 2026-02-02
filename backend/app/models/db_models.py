@@ -381,3 +381,293 @@ class VacancyLanguage(Base):
 
     vacancy: Mapped["Vacancy"] = relationship(back_populates="languages")
     language: Mapped["DictLanguage | None"] = relationship()
+
+
+# ============ RESUME (MAIN) ============
+
+
+class Resume(Base):
+    """Main resumes table."""
+    __tablename__ = "resumes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    
+    # Personal info
+    first_name: Mapped[str | None] = mapped_column(String(100))
+    last_name: Mapped[str | None] = mapped_column(String(100))
+    middle_name: Mapped[str | None] = mapped_column(String(100))
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    gender: Mapped[str | None] = mapped_column(String(10))
+    photo_url: Mapped[str | None] = mapped_column(Text)
+    
+    # Desired position
+    desired_position: Mapped[str | None] = mapped_column(String(255))
+    desired_salary_min: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    desired_salary_max: Mapped[float | None] = mapped_column(Numeric(15, 2))
+    desired_salary_currency: Mapped[str] = mapped_column(String(10), default="RUB")
+    
+    # Location preferences
+    city: Mapped[str | None] = mapped_column(String(100))
+    region: Mapped[str | None] = mapped_column(String(100))
+    country: Mapped[str | None] = mapped_column(String(100), default="Россия")
+    willing_to_relocate: Mapped[bool] = mapped_column(Boolean, default=False)
+    willing_to_travel: Mapped[bool] = mapped_column(Boolean, default=False)
+    travel_time_percent: Mapped[int | None] = mapped_column(Integer)
+    
+    # Employment preferences
+    employment_type: Mapped[str | None] = mapped_column(String(50))
+    schedule_type: Mapped[str | None] = mapped_column(String(50))
+    remote_preference: Mapped[str | None] = mapped_column(String(20))
+    
+    # Professional summary
+    summary: Mapped[str | None] = mapped_column(Text)
+    total_experience_months: Mapped[int | None] = mapped_column(Integer)
+    
+    # Metadata
+    source: Mapped[str | None] = mapped_column(String(50))
+    source_url: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    contacts: Mapped["ResumeContacts | None"] = relationship(back_populates="resume", uselist=False, cascade="all, delete-orphan")
+    experiences: Mapped[list["ResumeExperience"]] = relationship(back_populates="resume", cascade="all, delete-orphan")
+    education: Mapped[list["ResumeEducation"]] = relationship(back_populates="resume", cascade="all, delete-orphan")
+    skills: Mapped[list["ResumeSkill"]] = relationship(back_populates="resume", cascade="all, delete-orphan")
+    languages: Mapped[list["ResumeLanguage"]] = relationship(back_populates="resume", cascade="all, delete-orphan")
+    certificates: Mapped[list["ResumeCertificate"]] = relationship(back_populates="resume", cascade="all, delete-orphan")
+    full_text: Mapped["ResumeFullText | None"] = relationship(back_populates="resume", uselist=False, cascade="all, delete-orphan")
+    vector: Mapped["ResumeVector | None"] = relationship(back_populates="resume", uselist=False, cascade="all, delete-orphan")
+    vacancy_matches: Mapped[list["ResumeVacancyMatch"]] = relationship(back_populates="resume", cascade="all, delete-orphan")
+
+
+# ============ RESUME RELATED TABLES ============
+
+
+class ResumeContacts(Base):
+    """Resume contacts (1:1 with resume)."""
+    __tablename__ = "resume_contacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    email: Mapped[str | None] = mapped_column(String(255))
+    phone: Mapped[str | None] = mapped_column(String(50))
+    phone_secondary: Mapped[str | None] = mapped_column(String(50))
+    telegram: Mapped[str | None] = mapped_column(String(100))
+    whatsapp: Mapped[str | None] = mapped_column(String(50))
+    linkedin_url: Mapped[str | None] = mapped_column(Text)
+    github_url: Mapped[str | None] = mapped_column(Text)
+    portfolio_url: Mapped[str | None] = mapped_column(Text)
+    other_contacts: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="contacts")
+
+
+class ResumeExperience(Base):
+    """Work experience records."""
+    __tablename__ = "resume_experiences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    company_industry: Mapped[str | None] = mapped_column(String(100))
+    company_size: Mapped[str | None] = mapped_column(String(50))
+    company_url: Mapped[str | None] = mapped_column(Text)
+    
+    position: Mapped[str] = mapped_column(String(255), nullable=False)
+    department: Mapped[str | None] = mapped_column(String(255))
+    
+    start_date: Mapped[date | None] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False)
+    duration_months: Mapped[int | None] = mapped_column(Integer)
+    
+    location_city: Mapped[str | None] = mapped_column(String(100))
+    location_country: Mapped[str | None] = mapped_column(String(100))
+    
+    responsibilities: Mapped[str | None] = mapped_column(Text)
+    achievements: Mapped[str | None] = mapped_column(Text)
+    technologies: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="experiences")
+
+
+class ResumeEducation(Base):
+    """Education records."""
+    __tablename__ = "resume_education"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    
+    institution_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    institution_type: Mapped[str | None] = mapped_column(String(50))
+    
+    faculty: Mapped[str | None] = mapped_column(String(255))
+    specialization: Mapped[str | None] = mapped_column(String(255))
+    degree: Mapped[str | None] = mapped_column(String(50))
+    
+    start_year: Mapped[int | None] = mapped_column(Integer)
+    end_year: Mapped[int | None] = mapped_column(Integer)
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    location_city: Mapped[str | None] = mapped_column(String(100))
+    location_country: Mapped[str | None] = mapped_column(String(100))
+    
+    description: Mapped[str | None] = mapped_column(Text)
+    gpa: Mapped[float | None] = mapped_column(Numeric(3, 2))
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="education")
+
+
+class ResumeSkill(Base):
+    """Resume skills."""
+    __tablename__ = "resume_skills"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    skill_id: Mapped[int | None] = mapped_column(ForeignKey("dict_skills.id"))
+    
+    skill_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str] = mapped_column(String(50), default="hard")
+    level: Mapped[str | None] = mapped_column(String(20))
+    years_of_experience: Mapped[int | None] = mapped_column(Integer)
+    last_used_year: Mapped[int | None] = mapped_column(Integer)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="skills")
+    skill: Mapped["DictSkill | None"] = relationship()
+
+
+class ResumeLanguage(Base):
+    """Resume languages."""
+    __tablename__ = "resume_languages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    language_id: Mapped[int | None] = mapped_column(ForeignKey("dict_languages.id"))
+    
+    language_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    language_code: Mapped[str | None] = mapped_column(String(10))
+    proficiency: Mapped[str | None] = mapped_column(String(20))
+    is_native: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="languages")
+    language: Mapped["DictLanguage | None"] = relationship()
+
+
+class ResumeCertificate(Base):
+    """Resume certificates."""
+    __tablename__ = "resume_certificates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    issuing_organization: Mapped[str | None] = mapped_column(String(255))
+    issue_date: Mapped[date | None] = mapped_column(Date)
+    expiry_date: Mapped[date | None] = mapped_column(Date)
+    credential_id: Mapped[str | None] = mapped_column(String(255))
+    credential_url: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="certificates")
+
+
+class ResumeFullText(Base):
+    """Full text content (1:1 with resume)."""
+    __tablename__ = "resume_full_texts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    full_text: Mapped[str | None] = mapped_column(Text)
+    source_file_name: Mapped[str | None] = mapped_column(String(255))
+    source_file_type: Mapped[str | None] = mapped_column(String(20))
+    source_file_size: Mapped[int | None] = mapped_column(Integer)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="full_text")
+
+
+class ResumeVector(Base):
+    """Resume vector embeddings (1:1 with resume)."""
+    __tablename__ = "resume_vectors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    # Note: embedding column is vector(1536) in PostgreSQL
+    # SQLAlchemy doesn't have native pgvector support, so we use raw SQL for vector operations
+    model_name: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="vector")
+
+
+class VacancyVector(Base):
+    """Vacancy vector embeddings (1:1 with vacancy)."""
+    __tablename__ = "vacancy_vectors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    vacancy_id: Mapped[int] = mapped_column(ForeignKey("vacancies.id", ondelete="CASCADE"), unique=True, nullable=False)
+    
+    # Note: embedding column is vector(1536) in PostgreSQL
+    model_name: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    vacancy: Mapped["Vacancy"] = relationship()
+
+
+class ResumeVacancyMatch(Base):
+    """Resume-Vacancy matching results."""
+    __tablename__ = "resume_vacancy_matches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resume_id: Mapped[int] = mapped_column(ForeignKey("resumes.id", ondelete="CASCADE"), nullable=False)
+    vacancy_id: Mapped[int] = mapped_column(ForeignKey("vacancies.id", ondelete="CASCADE"), nullable=False)
+    
+    # Overall match score (0-100)
+    match_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    
+    # Detailed weighted scores by category
+    weighted_scores: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    
+    # Raw cosine similarity
+    cosine_similarity: Mapped[float | None] = mapped_column(Numeric(10, 8))
+    
+    # Generated interview questions
+    interview_questions: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    
+    # Gap analysis
+    gaps_analysis: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    
+    # Candidate strengths
+    strengths: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    resume: Mapped["Resume"] = relationship(back_populates="vacancy_matches")
+    vacancy: Mapped["Vacancy"] = relationship()
