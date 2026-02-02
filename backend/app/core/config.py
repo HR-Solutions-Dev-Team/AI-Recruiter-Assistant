@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
     session_expire_seconds: int = 3600  # 1 hour
 
+    # PostgreSQL Database
+    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/ai_recruiter"
+
     # File uploads
     max_upload_size_mb: int = 10
     allowed_file_extensions: list[str] = [".txt", ".docx", ".pdf"]

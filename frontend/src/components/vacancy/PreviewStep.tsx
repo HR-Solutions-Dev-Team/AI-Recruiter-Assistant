@@ -1,12 +1,14 @@
-import { MapPin, Building2, Clock, Briefcase, DollarSign, CheckCircle2, Users, GraduationCap, Languages } from 'lucide-react';
+import { MapPin, Building2, Clock, Briefcase, DollarSign, CheckCircle2, Users, GraduationCap, Languages, Loader2, AlertCircle } from 'lucide-react';
 import type { VacancyInput } from '../../types/vacancy';
 
 interface PreviewStepProps {
   vacancyData: VacancyInput;
   onSave: () => void;
+  isSaving?: boolean;
+  saveError?: string | null;
 }
 
-export default function PreviewStep({ vacancyData, onSave }: PreviewStepProps) {
+export default function PreviewStep({ vacancyData, onSave, isSaving = false, saveError = null }: PreviewStepProps) {
   const formatSalary = () => {
     const salary = vacancyData.workConditions?.salary;
     if (!salary?.amountMin && !salary?.amountMax) return 'Не указана';
@@ -210,15 +212,34 @@ export default function PreviewStep({ vacancyData, onSave }: PreviewStepProps) {
         </div>
       </div>
 
+      {/* Error Message */}
+      {saveError && (
+        <div className="mt-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+          <AlertCircle size={20} className="text-red-500 flex-shrink-0" />
+          <span className="text-red-700 text-sm">{saveError}</span>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="mt-8 flex justify-end gap-3">
         <button
           onClick={onSave}
+          disabled={isSaving}
           className="flex items-center gap-2 px-6 py-3 bg-gray-900 text-white
-                     rounded-xl font-medium text-sm hover:bg-gray-800 transition-colors"
+                     rounded-xl font-medium text-sm hover:bg-gray-800 transition-colors
+                     disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <CheckCircle2 size={18} strokeWidth={2} />
-          Сохранить вакансию
+          {isSaving ? (
+            <>
+              <Loader2 size={18} strokeWidth={2} className="animate-spin" />
+              Сохранение...
+            </>
+          ) : (
+            <>
+              <CheckCircle2 size={18} strokeWidth={2} />
+              Сохранить вакансию
+            </>
+          )}
         </button>
       </div>
     </div>

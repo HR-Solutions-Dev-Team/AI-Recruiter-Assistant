@@ -6,7 +6,9 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import get_db
 from app.core.redis import RedisClient, get_redis
 from app.core.security import verify_token
 
@@ -39,3 +41,4 @@ async def get_current_user_id(
 # Type aliases для удобства
 CurrentUserId = Annotated[str, Depends(get_current_user_id)]
 Redis = Annotated[RedisClient, Depends(get_redis)]
+DB = Annotated[AsyncSession, Depends(get_db)]

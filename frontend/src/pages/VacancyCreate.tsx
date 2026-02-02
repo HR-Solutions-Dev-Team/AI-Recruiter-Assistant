@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X } from 'lucide-react';
+import { X, Loader2 } from 'lucide-react';
 import Breadcrumbs from '../components/Breadcrumbs';
 import StepIndicator from '../components/vacancy/StepIndicator';
 import UploadStep from '../components/vacancy/UploadStep';
 import ChatStep from '../components/vacancy/ChatStep';
 import EditStep, { DEFAULT_WEIGHTS, type CriteriaWeights } from '../components/vacancy/EditStep';
 import PreviewStep from '../components/vacancy/PreviewStep';
-import { calculateWeights } from '../api/vacancy';
+import { calculateWeights, saveVacancy } from '../api/vacancy';
 import type { VacancyInput } from '../types/vacancy';
 
 const STEPS = [
@@ -36,6 +36,10 @@ export default function VacancyCreate() {
   const [criteriaWeights, setCriteriaWeights] = useState<CriteriaWeights>(DEFAULT_WEIGHTS);
   const [isCalculatingWeights, setIsCalculatingWeights] = useState(false);
   const weightsCalculatedRef = useRef(false);
+  
+  // Сохранение
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Функция расчёта весов через API
   const fetchWeights = useCallback(async () => {
@@ -91,9 +95,37 @@ export default function VacancyCreate() {
     navigate('/vacancy');
   };
 
-  const handleSave = () => {
-    // Симуляция сохранения
-    navigate('/vacancy');
+  const handleSave = async () => {
+    if (!sessionId) {
+      setSaveError('Сессия не найдена');
+      return;
+    }
+    
+    setIsSaving(true);
+    setSaveError(null);
+    
+    try {
+      // Convert CriteriaWeights to Record<string, number>
+      const weightsRecord: Record<string, number> = {
+        core: criteriaWeights.core,
+        company: criteriaWeights.company,
+        workConditions: criteriaWeights.workConditions,
+        requirements: criteriaWeights.requirements,
+        responsibilities: criteriaWeights.responsibilities,
+        hiringContext: criteriaWeights.hiringContext,
+        successCriteria: criteriaWeights.successCriteria,
+        differentiators: criteriaWeights.differentiators,
+        dealbreakers: criteriaWeights.dealbreakers,
+      };
+      
+      await saveVacancy(sessionId, weightsRecord);
+      navigate('/vacancy');
+    } catch (error) {
+      console.error('Failed to save vacancy:', error);
+      setSaveError(error instanceof Error ? error.message : 'Не удалось сохранить вакансию');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -163,6 +195,8 @@ export default function VacancyCreate() {
           <PreviewStep
             vacancyData={vacancyData}
             onSave={handleSave}
+            isSaving={isSaving}
+            saveError={saveError}
           />
         )}
       </div>

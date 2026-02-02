@@ -76,6 +76,39 @@ export interface CalculateWeightsResponse {
   weights: Record<string, number>;  // баллы 0-10 для каждой категории
 }
 
+// ============ Vacancy CRUD Types ============
+
+export interface VacancyListItem {
+  id: number;
+  job_title: string;
+  company_name: string | null;
+  location_city: string | null;
+  status: string;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string;
+  created_at: string;
+}
+
+export interface VacancyListResponse {
+  items: VacancyListItem[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface SaveVacancyRequest {
+  session_id: string;
+  weights?: Record<string, number>;
+}
+
+export interface SaveVacancyResponse {
+  id: number;
+  job_title: string;
+  status: string;
+  message: string;
+}
+
 /**
  * Создать новую сессию для создания вакансии.
  */
@@ -181,4 +214,48 @@ export async function calculateWeights(
     `/v1/vacancy/session/${sessionId}/calculate-weights`,
     {}
   );
+}
+
+// ============ Vacancy CRUD Functions ============
+
+/**
+ * Получить список вакансий из БД.
+ */
+export async function getVacancies(
+  skip: number = 0,
+  limit: number = 50,
+  status?: string
+): Promise<VacancyListResponse> {
+  let url = `/v1/vacancy?skip=${skip}&limit=${limit}`;
+  if (status) {
+    url += `&status=${status}`;
+  }
+  return apiClient.get<VacancyListResponse>(url);
+}
+
+/**
+ * Получить одну вакансию по ID.
+ */
+export async function getVacancy(id: number): Promise<VacancyInput> {
+  return apiClient.get<VacancyInput>(`/v1/vacancy/${id}`);
+}
+
+/**
+ * Сохранить вакансию из сессии в БД.
+ */
+export async function saveVacancy(
+  sessionId: string,
+  weights?: Record<string, number>
+): Promise<SaveVacancyResponse> {
+  return apiClient.post<SaveVacancyResponse>('/v1/vacancy', {
+    session_id: sessionId,
+    weights,
+  });
+}
+
+/**
+ * Удалить вакансию.
+ */
+export async function deleteVacancy(id: number): Promise<void> {
+  await apiClient.delete(`/v1/vacancy/${id}`);
 }

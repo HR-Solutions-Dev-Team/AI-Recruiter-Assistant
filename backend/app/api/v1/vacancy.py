@@ -5,10 +5,11 @@ API эндпоинты для работы с вакансиями.
 import logging
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel, Field
 
-from app.api.deps import CurrentUserId, Redis
+from app.api.deps import CurrentUserId, DB, Redis
+from app.repositories.vacancy_repository import VacancyRepository
 from app.services.enrichment_service import enrichment_service
 from app.services.file_parser import FileParserError, file_parser_service
 from app.services.session import SessionService, SessionStatus, VacancySession
@@ -678,3 +679,311 @@ async def calculate_criteria_weights(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to calculate weights: {str(e)}",
         )
+
+
+# ============ Vacancy CRUD Models ============
+
+
+class VacancyListItem(BaseModel):
+    """Vacancy item for list view."""
+
+    id: int
+    job_title: str
+    company_name: str | None = None
+    location_city: str | None = None
+    status: str
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str = "RUB"
+    created_at: str
+
+
+class VacancyListResponse(BaseModel):
+    """Response with list of vacancies."""
+
+    items: list[VacancyListItem]
+    total: int
+    skip: int
+    limit: int
+
+
+class SaveVacancyRequest(BaseModel):
+    """Request to save vacancy from session."""
+
+    session_id: str = Field(..., description="Session ID with parsed vacancy data")
+    weights: dict[str, int] | None = Field(None, description="Criteria weights (0-10)")
+
+
+class SaveVacancyResponse(BaseModel):
+    """Response after saving vacancy."""
+
+    id: int
+    job_title: str
+    status: str
+    message: str = "Vacancy saved successfully"
+
+
+# ============ Vacancy CRUD Endpoints ============
+
+
+@router.get("", response_model=VacancyListResponse)
+async def get_vacancies(
+    user_id: CurrentUserId,
+    db: DB,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(50, ge=1, le=100, description="Max records to return"),
+    status_filter: str | None = Query(None, alias="status", description="Filter by status"),
+) -> VacancyListResponse:
+    """
+    Get list of vacancies.
+    
+    Returns paginated list with basic info for list view.
+    """
+    repo = VacancyRepository(db)
+    
+    vacancies = await repo.get_all(skip=skip, limit=limit, status=status_filter)
+    total = await repo.count(status=status_filter)
+    
+    items = []
+    for v in vacancies:
+        items.append(VacancyListItem(
+            id=v.id,
+            job_title=v.job_title,
+            company_name=v.company.name if v.company else None,
+            location_city=v.work_conditions.location_city if v.work_conditions else None,
+            status=v.status,
+            salary_min=float(v.work_conditions.salary_min) if v.work_conditions and v.work_conditions.salary_min else None,
+            salary_max=float(v.work_conditions.salary_max) if v.work_conditions and v.work_conditions.salary_max else None,
+            salary_currency=v.work_conditions.salary_currency if v.work_conditions else "RUB",
+            created_at=v.created_at.isoformat() if v.created_at else "",
+        ))
+    
+    return VacancyListResponse(
+        items=items,
+        total=total,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.post("", response_model=SaveVacancyResponse)
+async def save_vacancy(
+    request: SaveVacancyRequest,
+    user_id: CurrentUserId,
+    db: DB,
+    redis: Redis,
+) -> SaveVacancyResponse:
+    """
+    Save vacancy from session to database.
+    
+    Takes session_id, retrieves parsed data from Redis,
+    and persists to PostgreSQL.
+    """
+    # Get session data
+    session = await session_service.get_session(request.session_id, user_id)
+    
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+    
+    if not session.parsed_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session has no parsed data",
+        )
+    
+    try:
+        repo = VacancyRepository(db)
+        
+        # Create vacancy from parsed data
+        vacancy = await repo.create_from_parsed_data(
+            parsed_data=session.parsed_data,
+            weights=request.weights,
+            recruiter_id=None,  # TODO: link to recruiter when auth is fully implemented
+        )
+        
+        # Delete session after successful save
+        await session_service.delete_session(request.session_id, user_id)
+        
+        return SaveVacancyResponse(
+            id=vacancy.id,
+            job_title=vacancy.job_title,
+            status=vacancy.status,
+        )
+    
+    except Exception as e:
+        logger.error(f"Failed to save vacancy: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save vacancy: {str(e)}",
+        )
+
+
+@router.get("/{vacancy_id}")
+async def get_vacancy(
+    vacancy_id: int,
+    user_id: CurrentUserId,
+    db: DB,
+) -> dict[str, Any]:
+    """
+    Get single vacancy by ID with all details.
+    """
+    repo = VacancyRepository(db)
+    vacancy = await repo.get_by_id(vacancy_id)
+    
+    if vacancy is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vacancy not found",
+        )
+    
+    # Build response with all data
+    result: dict[str, Any] = {
+        "id": vacancy.id,
+        "core": {
+            "jobTitle": vacancy.job_title,
+            "synonyms": vacancy.synonyms,
+            "careerLevel": {
+                "code": vacancy.career_level_code,
+                "experienceYearsMin": vacancy.experience_years_min,
+                "experienceYearsMax": vacancy.experience_years_max,
+            } if vacancy.career_level_code else None,
+        },
+        "status": vacancy.status,
+        "priority": vacancy.priority,
+        "tags": vacancy.tags,
+        "createdAt": vacancy.created_at.isoformat() if vacancy.created_at else None,
+    }
+    
+    if vacancy.company:
+        result["company"] = {
+            "name": vacancy.company.name,
+            "type": vacancy.company.type,
+            "size": vacancy.company.size,
+            "activitySphere": vacancy.company.activity_sphere,
+            "publicLinks": vacancy.company.public_links,
+        }
+    
+    if vacancy.work_conditions:
+        wc = vacancy.work_conditions
+        result["workConditions"] = {
+            "employmentType": {"name": wc.employment_type} if wc.employment_type else None,
+            "schedule": {"name": wc.schedule_type} if wc.schedule_type else None,
+            "workHours": wc.work_hours,
+            "salary": {
+                "amountMin": float(wc.salary_min) if wc.salary_min else None,
+                "amountMax": float(wc.salary_max) if wc.salary_max else None,
+                "currency": wc.salary_currency,
+                "period": wc.salary_period,
+                "comment": wc.salary_comment,
+            },
+            "location": {
+                "city": wc.location_city,
+                "region": wc.location_region,
+                "country": wc.location_country,
+                "remote": wc.remote_type,
+                "relocationSupport": wc.relocation_support,
+                "visaSupport": wc.visa_support,
+            },
+        }
+    
+    if vacancy.requirements:
+        result["requirements"] = {
+            "education": vacancy.requirements.education,
+            "experience": vacancy.requirements.experience,
+        }
+    
+    if vacancy.skills:
+        result["requirements"] = result.get("requirements", {})
+        result["requirements"]["skills"] = [
+            {
+                "name": s.skill_name,
+                "category": s.category,
+                "isRequired": s.is_required,
+                "level": s.level,
+                "comment": s.comment,
+            }
+            for s in vacancy.skills
+        ]
+    
+    if vacancy.languages:
+        result["requirements"] = result.get("requirements", {})
+        result["requirements"]["languages"] = [
+            {
+                "name": lang.language_name,
+                "code": lang.language_code,
+                "proficiency": lang.proficiency,
+                "isRequired": lang.is_required,
+            }
+            for lang in vacancy.languages
+        ]
+    
+    if vacancy.responsibilities:
+        result["responsibilities"] = {
+            "scope": vacancy.responsibilities.scope,
+            "zones": vacancy.responsibilities.zones,
+            "criticalTasks": vacancy.responsibilities.critical_tasks,
+            "processOwnership": vacancy.responsibilities.process_ownership,
+            "decisionAuthority": vacancy.responsibilities.decision_authority,
+            "businessProcesses": vacancy.responsibilities.business_processes,
+        }
+    
+    if vacancy.org_structure:
+        result["orgStructure"] = {
+            "reportsTo": vacancy.org_structure.reports_to,
+            "subordinatesCount": vacancy.org_structure.subordinates_count,
+            "orgUnit": vacancy.org_structure.org_unit,
+            "teamRoles": vacancy.org_structure.team_roles,
+            "crossFunctionalLinks": vacancy.org_structure.cross_functional_links,
+        }
+    
+    if vacancy.executive_search:
+        result["hiringContext"] = vacancy.executive_search.hiring_context
+        result["successCriteria"] = vacancy.executive_search.success_criteria
+        result["differentiators"] = vacancy.executive_search.differentiators
+        result["dealbreakers"] = vacancy.executive_search.dealbreakers
+        result["searchDifficulty"] = vacancy.executive_search.search_difficulty
+    
+    if vacancy.full_text:
+        result["fullText"] = {
+            "text": vacancy.full_text.full_text,
+            "source": vacancy.full_text.source,
+        }
+    
+    if vacancy.weights:
+        result["weights"] = {
+            "core": vacancy.weights.weight_core,
+            "company": vacancy.weights.weight_company,
+            "workConditions": vacancy.weights.weight_work_conditions,
+            "requirements": vacancy.weights.weight_requirements,
+            "responsibilities": vacancy.weights.weight_responsibilities,
+            "hiringContext": vacancy.weights.weight_hiring_context,
+            "successCriteria": vacancy.weights.weight_success_criteria,
+            "differentiators": vacancy.weights.weight_differentiators,
+            "dealbreakers": vacancy.weights.weight_dealbreakers,
+        }
+    
+    return result
+
+
+@router.delete("/{vacancy_id}")
+async def delete_vacancy(
+    vacancy_id: int,
+    user_id: CurrentUserId,
+    db: DB,
+) -> dict[str, str]:
+    """
+    Delete vacancy by ID.
+    """
+    repo = VacancyRepository(db)
+    deleted = await repo.delete(vacancy_id)
+    
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vacancy not found",
+        )
+    
+    return {"status": "deleted"}
