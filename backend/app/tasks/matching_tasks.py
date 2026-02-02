@@ -118,18 +118,19 @@ async def _process_resume_matching_async(resume_id: int) -> dict[str, Any]:
                     vacancy_embedding = await embedding_service.create_vacancy_embedding(vacancy_data)
                     await repo.save_vacancy_embedding(vacancy.id, vacancy_embedding)
 
-                # Calculate match score with weights
-                match_score, cosine_sim, weighted_scores = matching_service.calculate_match_score(
-                    resume_embedding,
-                    vacancy_embedding,
-                    weights,
-                )
-
-                # Analyze gaps
+                # Analyze gaps FIRST (needed for score calculation)
                 gaps = await matching_service.analyze_gaps(resume_data, vacancy_data)
 
                 # Identify strengths
                 strengths = await matching_service.identify_strengths(resume_data, vacancy_data)
+
+                # Calculate match score with weights AND gaps
+                match_score, cosine_sim, weighted_scores = matching_service.calculate_match_score(
+                    resume_embedding,
+                    vacancy_embedding,
+                    weights,
+                    gaps,  # Pass gaps for penalty calculation
+                )
 
                 # Generate interview questions (only if score is reasonable)
                 interview_questions = []
@@ -413,14 +414,14 @@ def process_vacancy_matching(self, vacancy_id: int) -> dict[str, Any]:
                         resume_embedding = await embedding_service.create_resume_embedding(resume_data)
                         await repo.save_embedding(resume.id, resume_embedding)
 
-                    # Calculate match score
-                    match_score, cosine_sim, weighted_scores = matching_service.calculate_match_score(
-                        resume_embedding, vacancy_embedding, weights
-                    )
-
-                    # Analyze gaps
+                    # Analyze gaps FIRST
                     gaps = await matching_service.analyze_gaps(resume_data, vacancy_data)
                     strengths = await matching_service.identify_strengths(resume_data, vacancy_data)
+
+                    # Calculate match score with gaps
+                    match_score, cosine_sim, weighted_scores = matching_service.calculate_match_score(
+                        resume_embedding, vacancy_embedding, weights, gaps
+                    )
 
                     # Generate questions
                     interview_questions = []

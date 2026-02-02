@@ -66,19 +66,21 @@ class MatchingService:
         resume_embedding: list[float],
         vacancy_embedding: list[float],
         weights: dict[str, int] | None = None,
+        gaps: dict[str, Any] | None = None,
     ) -> tuple[float, float, dict[str, dict[str, float]]]:
         """
-        Calculates weighted match score between resume and vacancy.
+        Calculates strict weighted match score for high-skilled specialist search.
 
-        The base score is cosine similarity (0-1), then adjusted by weights:
-        - Higher weights (7-10) amplify importance of match
-        - Lower weights (0-3) reduce impact on final score
-        - Weight 0 means the category is ignored
+        Scoring formula:
+        - Cosine 0.5 = 0%, Cosine 1.0 = 100% (linear scale)
+        - Gaps reduce score proportionally to category weights
+        - Critical gaps (weight 9-10) cause significant penalties
 
         Args:
             resume_embedding: Resume vector
             vacancy_embedding: Vacancy vector
             weights: Category weights (0-10 scale)
+            gaps: Identified gaps from analyze_gaps
 
         Returns:
             Tuple of (match_score 0-100, cosine_similarity, weighted_scores dict)
@@ -86,48 +88,58 @@ class MatchingService:
         # Calculate base cosine similarity
         raw_similarity = cosine_similarity(resume_embedding, vacancy_embedding)
         
-        # Convert to 0-100 scale (cosine is -1 to 1, but embeddings usually 0 to 1)
-        base_score = max(0, (raw_similarity + 1) / 2) * 100
+        # Strict linear scale: 0.5 = 0%, 1.0 = 100%
+        # Formula: (cosine - 0.5) * 200
+        base_score = max(0, min(100, (raw_similarity - 0.5) * 200))
+        
+        logger.info(f"Cosine similarity: {raw_similarity:.4f} -> Base score: {base_score:.1f}%")
         
         if not weights:
-            # No weights - return base score
             return base_score, raw_similarity, {}
 
-        # Apply weight adjustments
-        # Formula: final_score = base_score * weight_multiplier
-        # where weight_multiplier is based on average weight importance
-        
+        # Calculate weighted category scores and penalties
+        weighted_scores = {}
         total_weight = 0
         weighted_sum = 0
-        weighted_scores = {}
+        total_penalty = 0
+
+        # Map gaps to categories for penalty calculation
+        gap_penalties = self._calculate_gap_penalties(gaps, weights)
 
         for category, weight_key in WEIGHT_CATEGORIES.items():
-            weight = weights.get(weight_key, weights.get(category, 5))  # Default weight 5
+            weight = weights.get(weight_key, weights.get(category, 5))
             
-            # Weight 0-1 means "не важно" - minimal impact
-            # Weight 9-10 means "критично" - maximum impact
-            
-            # Calculate category contribution
-            # Weight multiplier: 0 -> 0.1, 5 -> 1.0, 10 -> 1.5
-            if weight <= 1:
-                multiplier = 0.1 + (weight * 0.1)  # 0-1 -> 0.1-0.2
-            elif weight <= 5:
-                multiplier = 0.2 + ((weight - 1) * 0.2)  # 1-5 -> 0.2-1.0
-            else:
-                multiplier = 1.0 + ((weight - 5) * 0.1)  # 5-10 -> 1.0-1.5
+            if weight == 0:
+                # Category ignored
+                weighted_scores[category] = {
+                    "weight": 0,
+                    "penalty": 0,
+                    "contribution": 0,
+                }
+                continue
 
-            category_score = base_score * multiplier
+            # Get penalty for this category based on gaps
+            category_penalty = gap_penalties.get(category, 0)
+            
+            # Category score = base_score minus penalty
+            # Penalty impact scales with weight (critical categories hurt more)
+            penalty_impact = category_penalty * (weight / 10)  # Scale by importance
+            category_score = max(0, base_score - penalty_impact)
+            
+            # Weight contribution to final score
+            contribution = category_score * weight
             
             weighted_scores[category] = {
                 "weight": weight,
-                "multiplier": round(multiplier, 2),
-                "score": round(category_score, 2),
+                "base_score": round(base_score, 2),
+                "penalty": round(penalty_impact, 2),
+                "category_score": round(category_score, 2),
+                "contribution": round(contribution, 2),
             }
             
-            # Only count categories with weight > 0
-            if weight > 0:
-                total_weight += weight
-                weighted_sum += category_score * weight
+            total_weight += weight
+            weighted_sum += contribution
+            total_penalty += penalty_impact
 
         # Calculate final weighted score
         if total_weight > 0:
@@ -138,7 +150,79 @@ class MatchingService:
         # Clamp to 0-100
         final_score = max(0, min(100, final_score))
 
+        logger.info(f"Final score: {final_score:.1f}% (base: {base_score:.1f}%, total penalty: {total_penalty:.1f})")
+
         return round(final_score, 2), raw_similarity, weighted_scores
+
+    def _calculate_gap_penalties(
+        self,
+        gaps: dict[str, Any] | None,
+        weights: dict[str, int],
+    ) -> dict[str, float]:
+        """
+        Calculate penalties for each category based on identified gaps.
+        
+        Penalty scale:
+        - Missing required skill: 15% per skill
+        - Missing optional skill: 5% per skill
+        - Insufficient experience: 20%
+        - Missing must-have experience: 25%
+        - Missing required language: 15%
+        - Missing optional language: 5%
+        """
+        penalties = {cat: 0.0 for cat in WEIGHT_CATEGORIES}
+        
+        if not gaps:
+            return penalties
+        
+        # Skills penalties -> affects "requirements" category
+        missing_skills = gaps.get("missing_skills", [])
+        for skill in missing_skills:
+            if skill.get("required"):
+                penalties["requirements"] += 15  # Required skill missing
+            else:
+                penalties["requirements"] += 5   # Optional skill missing
+        
+        # Experience penalties -> affects "requirements" and "core"
+        experience_gaps = gaps.get("experience_gaps", [])
+        for gap in experience_gaps:
+            if gap.get("type") == "insufficient_years":
+                # Calculate penalty based on how much experience is missing
+                required = gap.get("required", 0)
+                actual = gap.get("actual", 0)
+                if required > 0:
+                    deficit_ratio = (required - actual) / required
+                    penalties["requirements"] += 20 * deficit_ratio
+                    penalties["core"] += 10 * deficit_ratio
+            elif gap.get("type") == "missing_must_have":
+                penalties["requirements"] += 25  # Critical experience missing
+                penalties["core"] += 15
+        
+        # Language penalties -> affects "requirements"
+        language_gaps = gaps.get("language_gaps", [])
+        for gap in language_gaps:
+            if gap.get("is_required"):
+                penalties["requirements"] += 15
+            else:
+                penalties["requirements"] += 5
+        
+        # Education gaps -> affects "requirements"
+        education_gaps = gaps.get("education_gaps", [])
+        for gap in education_gaps:
+            penalties["requirements"] += 10
+        
+        # Other gaps
+        other_gaps = gaps.get("other_gaps", [])
+        for gap in other_gaps:
+            penalties["differentiators"] += 5
+        
+        # Cap penalties at reasonable maximum per category
+        for cat in penalties:
+            penalties[cat] = min(penalties[cat], 80)  # Max 80% penalty per category
+        
+        logger.info(f"Gap penalties: {penalties}")
+        
+        return penalties
 
     async def analyze_gaps(
         self,
