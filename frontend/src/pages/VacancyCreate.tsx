@@ -1,16 +1,27 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Loader2 } from 'lucide-react';
+import { X } from 'lucide-react';
 import Breadcrumbs from '../components/Breadcrumbs';
 import StepIndicator from '../components/vacancy/StepIndicator';
 import UploadStep from '../components/vacancy/UploadStep';
+import OverviewStep from '../components/vacancy/OverviewStep';
 import ChatStep from '../components/vacancy/ChatStep';
 import EditStep, { DEFAULT_WEIGHTS, type CriteriaWeights } from '../components/vacancy/EditStep';
 import PreviewStep from '../components/vacancy/PreviewStep';
 import { calculateWeights, saveVacancy } from '../api/vacancy';
 import type { VacancyInput } from '../types/vacancy';
 
-const STEPS = [
+// Шаги с обзором (5 шагов)
+const STEPS_WITH_OVERVIEW = [
+  { id: 1, title: 'Загрузка' },
+  { id: 2, title: 'Обзор' },
+  { id: 3, title: 'Уточнение' },
+  { id: 4, title: 'Редактирование' },
+  { id: 5, title: 'Предпросмотр' },
+];
+
+// Шаги без обзора (4 шага)
+const STEPS_WITHOUT_OVERVIEW = [
   { id: 1, title: 'Загрузка' },
   { id: 2, title: 'Уточнение' },
   { id: 3, title: 'Редактирование' },
@@ -32,6 +43,9 @@ export default function VacancyCreate() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [completionPercent, setCompletionPercent] = useState(0);
   
+  // Обзор вакансии
+  const [wantsOverview, setWantsOverview] = useState(true);
+  
   // Веса критериев
   const [criteriaWeights, setCriteriaWeights] = useState<CriteriaWeights>(DEFAULT_WEIGHTS);
   const [isCalculatingWeights, setIsCalculatingWeights] = useState(false);
@@ -40,6 +54,21 @@ export default function VacancyCreate() {
   // Сохранение
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Динамический массив шагов в зависимости от выбора обзора
+  const steps = useMemo(() => 
+    wantsOverview ? STEPS_WITH_OVERVIEW : STEPS_WITHOUT_OVERVIEW,
+    [wantsOverview]
+  );
+
+  // Номера шагов в зависимости от наличия обзора
+  const stepNumbers = useMemo(() => ({
+    upload: 1,
+    overview: wantsOverview ? 2 : -1, // -1 = не показывать
+    chat: wantsOverview ? 3 : 2,
+    edit: wantsOverview ? 4 : 3,
+    preview: wantsOverview ? 5 : 4,
+  }), [wantsOverview]);
 
   // Функция расчёта весов через API
   const fetchWeights = useCallback(async () => {
@@ -57,13 +86,13 @@ export default function VacancyCreate() {
     }
   }, [sessionId]);
 
-  // Автоматический расчёт весов при переходе на шаг 3 (EditStep)
+  // Автоматический расчёт весов при переходе на EditStep
   useEffect(() => {
-    if (currentStep === 3 && sessionId && !weightsCalculatedRef.current) {
+    if (currentStep === stepNumbers.edit && sessionId && !weightsCalculatedRef.current) {
       weightsCalculatedRef.current = true;
       fetchWeights();
     }
-  }, [currentStep, sessionId, fetchWeights]);
+  }, [currentStep, sessionId, fetchWeights, stepNumbers.edit]);
 
   // Обработчик пересчёта весов вручную
   const handleRecalculateWeights = useCallback(() => {
@@ -71,7 +100,8 @@ export default function VacancyCreate() {
   }, [fetchWeights]);
 
   const handleNextStep = () => {
-    if (currentStep < 4) {
+    const maxStep = wantsOverview ? 5 : 4;
+    if (currentStep < maxStep) {
       setCurrentStep(currentStep + 1);
     }
   };
@@ -79,11 +109,14 @@ export default function VacancyCreate() {
   const handleUploadComplete = (
     newSessionId: string,
     parsedData: VacancyInput,
-    newCompletionPercent: number
+    newCompletionPercent: number,
+    userWantsOverview: boolean
   ) => {
     setSessionId(newSessionId);
     setVacancyData(parsedData);
     setCompletionPercent(newCompletionPercent);
+    setWantsOverview(userWantsOverview);
+    // Переход на шаг 2 (обзор или уточнение в зависимости от выбора)
     setCurrentStep(2);
   };
 
@@ -158,17 +191,25 @@ export default function VacancyCreate() {
       </div>
 
       {/* Step Indicator */}
-      <StepIndicator steps={STEPS} currentStep={currentStep} />
+      <StepIndicator steps={steps} currentStep={currentStep} />
 
       {/* Step Content */}
       <div className="mt-8">
-        {currentStep === 1 && (
+        {currentStep === stepNumbers.upload && (
           <UploadStep
             onNext={handleUploadComplete}
             setVacancyData={setVacancyData}
           />
         )}
-        {currentStep === 2 && sessionId && (
+        {currentStep === stepNumbers.overview && sessionId && wantsOverview && (
+          <OverviewStep
+            sessionId={sessionId}
+            jobTitle={vacancyData.core.jobTitle}
+            companyName={vacancyData.company?.name}
+            onNext={handleNextStep}
+          />
+        )}
+        {currentStep === stepNumbers.chat && sessionId && (
           <ChatStep
             sessionId={sessionId}
             onNext={handleNextStep}
@@ -178,7 +219,7 @@ export default function VacancyCreate() {
             setCompletionPercent={setCompletionPercent}
           />
         )}
-        {currentStep === 3 && (
+        {currentStep === stepNumbers.edit && (
           <EditStep
             onNext={handleNextStep}
             vacancyData={vacancyData}
@@ -191,7 +232,7 @@ export default function VacancyCreate() {
             onRecalculateWeights={handleRecalculateWeights}
           />
         )}
-        {currentStep === 4 && (
+        {currentStep === stepNumbers.preview && (
           <PreviewStep
             vacancyData={vacancyData}
             onSave={handleSave}

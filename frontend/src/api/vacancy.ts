@@ -87,6 +87,18 @@ export interface CalculateWeightsResponse {
   weights: Record<string, number>;  // баллы 0-10 для каждой категории
 }
 
+export interface OverviewData {
+  role_description: string;
+  company_overview: string | null;
+  industry_context: string;
+  business_processes: string[];
+}
+
+export interface GenerateOverviewResponse {
+  data: OverviewData;
+  sources: string[] | null;
+}
+
 // ============ Vacancy CRUD Types ============
 
 export interface VacancyListItem {
@@ -235,6 +247,19 @@ export async function calculateWeights(
 ): Promise<CalculateWeightsResponse> {
   return apiClient.post<CalculateWeightsResponse>(
     `/v1/vacancy/session/${sessionId}/calculate-weights`,
+    {}
+  );
+}
+
+/**
+ * Сгенерировать обзор вакансии через Perplexity.
+ * Вызывается после парсинга, если пользователь включил опцию обзора.
+ */
+export async function generateOverview(
+  sessionId: string
+): Promise<GenerateOverviewResponse> {
+  return apiClient.post<GenerateOverviewResponse>(
+    `/v1/vacancy/session/${sessionId}/generate-overview`,
     {}
   );
 }

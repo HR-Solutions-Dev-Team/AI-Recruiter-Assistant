@@ -1,8 +1,39 @@
 import { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { Upload, Type, AlertCircle, File, X, Info, ArrowRight, XCircle } from 'lucide-react';
+import { Upload, Type, AlertCircle, File, X, Info, ArrowRight, XCircle, Sparkles } from 'lucide-react';
 import { createSession, uploadText, uploadFile, type ParseResponse } from '../../api';
 import type { VacancyInput } from '../../types/vacancy';
 import AnalyzingAnimation from './AnalyzingAnimation';
+
+// Компонент Toggle Switch
+interface ToggleSwitchProps {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+  disabled?: boolean;
+}
+
+function ToggleSwitch({ enabled, onChange, disabled }: ToggleSwitchProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => !disabled && onChange(!enabled)}
+      disabled={disabled}
+      className={`
+        relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent
+        transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-900/20
+        ${enabled ? 'bg-gray-900' : 'bg-gray-200'}
+        ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
+      `}
+    >
+      <span
+        className={`
+          pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0
+          transition duration-200 ease-in-out
+          ${enabled ? 'translate-x-5' : 'translate-x-0'}
+        `}
+      />
+    </button>
+  );
+}
 
 // Компонент модального окна для невалидного документа
 interface ValidationErrorModalProps {
@@ -56,7 +87,7 @@ function ValidationErrorModal({ isOpen, message, onClose }: ValidationErrorModal
 type InputMode = 'file' | 'text';
 
 interface UploadStepProps {
-  onNext: (sessionId: string, parsedData: VacancyInput, completionPercent: number) => void;
+  onNext: (sessionId: string, parsedData: VacancyInput, completionPercent: number, wantsOverview: boolean) => void;
   setVacancyData: React.Dispatch<React.SetStateAction<VacancyInput>>;
 }
 
@@ -78,6 +109,9 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Состояние для обзора вакансии
+  const [wantsOverview, setWantsOverview] = useState(true);
   
   // Состояние для модального окна валидации
   const [showValidationModal, setShowValidationModal] = useState(false);
@@ -178,8 +212,8 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
       // Сохраняем parsed_data напрямую как VacancyInput
       setVacancyData(result.parsed_data);
 
-      // Сразу переходим к следующему шагу (ChatStep)
-      onNext(result.session_id, result.parsed_data, result.completion_percent);
+      // Переходим к следующему шагу (Overview или ChatStep)
+      onNext(result.session_id, result.parsed_data, result.completion_percent, wantsOverview);
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Произошла ошибка при обработке');
@@ -220,6 +254,29 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
             Загрузите файл с описанием вакансии или введите текст вручную. Система проанализирует
             содержимое с помощью ИИ и извлечёт структурированные данные для заполнения вакансии.
           </p>
+        </div>
+      </div>
+
+      {/* Overview Toggle */}
+      <div className="mb-6 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-100 rounded-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex gap-3">
+            <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
+              <Sparkles size={20} strokeWidth={2} className="text-purple-600" />
+            </div>
+            <div>
+              <p className="font-medium text-gray-900">Обзор роли и компании</p>
+              <p className="text-sm text-gray-600 mt-1">
+                ИИ подготовит краткую справку о профессии, компании и отрасли. 
+                Поможет лучше понять контекст вакансии перед уточнением деталей.
+              </p>
+            </div>
+          </div>
+          <ToggleSwitch
+            enabled={wantsOverview}
+            onChange={setWantsOverview}
+            disabled={isLoading}
+          />
         </div>
       </div>
 

@@ -12,6 +12,7 @@ from app.api.deps import CurrentUserId, DB, Redis
 from app.repositories.vacancy_repository import VacancyRepository
 from app.services.enrichment_service import enrichment_service
 from app.services.file_parser import FileParserError, file_parser_service
+from app.services.overview_service import overview_service
 from app.services.session import SessionService, SessionStatus, VacancySession
 from app.services.vacancy_parser import vacancy_parser_service
 from app.services.weights_service import weights_service
@@ -165,6 +166,28 @@ class CalculateWeightsResponse(BaseModel):
     """Ответ с рассчитанными весами критериев (баллы 0-10)."""
 
     weights: dict[str, int]  # баллы 0-10 для каждой категории
+
+
+class GenerateOverviewRequest(BaseModel):
+    """Запрос на генерацию обзора вакансии."""
+
+    pass  # Данные берутся из сессии
+
+
+class OverviewDataResponse(BaseModel):
+    """Данные обзора вакансии."""
+
+    role_description: str = Field(..., description="Описание роли в контексте сферы и компании")
+    company_overview: str | None = Field(None, description="Краткий обзор компании")
+    industry_context: str = Field(..., description="Контекст отрасли и её роль на рынке")
+    business_processes: list[str] = Field(..., description="Типичные бизнес-процессы для роли")
+
+
+class GenerateOverviewResponse(BaseModel):
+    """Ответ с обзором вакансии."""
+
+    data: OverviewDataResponse
+    sources: list[str] | None = Field(None, description="Источники информации")
 
 
 # ============ Helper Functions ============
@@ -836,6 +859,102 @@ async def calculate_criteria_weights(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to calculate weights: {str(e)}",
+        )
+
+
+@router.post("/session/{session_id}/generate-overview", response_model=GenerateOverviewResponse)
+async def generate_vacancy_overview(
+    session_id: str,
+    user_id: CurrentUserId,
+    redis: Redis,
+) -> GenerateOverviewResponse:
+    """
+    Генерирует обзор вакансии через Perplexity.
+
+    Возвращает:
+    - Описание роли в контексте сферы и компании
+    - Краткий обзор компании (если указана)
+    - Контекст отрасли и её роль на рынке
+    - Типичные бизнес-процессы для данной роли
+
+    Используется после парсинга вакансии, перед этапом уточнения.
+    """
+    session = await session_service.get_session(session_id, user_id)
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    if not session.parsed_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session has no parsed data",
+        )
+
+    # Извлекаем данные для генерации обзора
+    core = session.parsed_data.get("core", {})
+    company = session.parsed_data.get("company", {})
+    
+    job_title = core.get("jobTitle")
+    if not job_title:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job title is required for overview generation",
+        )
+
+    company_name = company.get("name")
+    
+    # Извлекаем отрасль
+    industry = None
+    if core.get("industry"):
+        industry = core["industry"].get("name")
+    
+    # Извлекаем сферу деятельности
+    activity_sphere = None
+    if company.get("activitySphere"):
+        sphere = company["activitySphere"]
+        if sphere.get("sphere"):
+            activity_sphere = sphere["sphere"].get("name")
+
+    try:
+        result = await overview_service.generate_overview(
+            job_title=job_title,
+            company_name=company_name,
+            industry=industry,
+            activity_sphere=activity_sphere,
+        )
+
+        # Сохраняем обзор в сессию
+        await session_service.update_session(
+            session_id,
+            user_id,
+            overview_data={
+                "role_description": result.data.role_description,
+                "company_overview": result.data.company_overview,
+                "industry_context": result.data.industry_context,
+                "business_processes": result.data.business_processes,
+                "sources": result.sources,
+            },
+            overview_requested=True,
+        )
+
+        return GenerateOverviewResponse(
+            data=OverviewDataResponse(
+                role_description=result.data.role_description,
+                company_overview=result.data.company_overview,
+                industry_context=result.data.industry_context,
+                business_processes=result.data.business_processes,
+            ),
+            sources=result.sources,
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to generate overview: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate overview: {str(e)}",
         )
 
 

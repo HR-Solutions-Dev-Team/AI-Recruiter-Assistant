@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "google/gemini-2.5-flash"
     openrouter_model_fast: str = "google/gemini-2.5-flash"
+    openrouter_model_perplexity: str = "perplexity/sonar"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # OpenAI API (for embeddings)
