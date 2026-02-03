@@ -310,31 +310,61 @@ FIELD_PRIORITIES: list[dict[str, Any]] = [
 # "узкого горлышка" для поиска редких специалистов.
 # ============================================================================
 
-QUESTION_GENERATION_PROMPT = """HR-эксперт по поиску редких специалистов.
+CONTEXT_AWARE_QUESTION_PROMPT = """Ты — HR-эксперт по поиску редких специалистов (Executive Search).
 
-Вакансия: {job_title}
-Заполняемое поле: {field_path}
+=== КОНТЕКСТ ВАКАНСИИ ===
+Должность: {job_title}
+Уровень: {career_level}
+Отрасль: {industry}
+Компания: {company_name}
+Локация: {location}
+Формат работы: {remote_type}
+
+=== УЖЕ ИЗВЕСТНАЯ ИНФОРМАЦИЯ ===
+{vacancy_summary}
+
+=== ИСТОРИЯ УТОЧНЕНИЙ (Q-A) ===
+{qa_history_formatted}
+
+=== ЗАДАЧА ===
+Нужно уточнить поле: {field_path}
 Описание поля: {field_description}
 
-Задай ПРЯМОЙ вопрос для заполнения ЭТОГО КОНКРЕТНОГО поля. Вопрос должен напрямую относиться к полю.
+ПРАВИЛА ГЕНЕРАЦИИ ВОПРОСА:
 
-ПРИМЕРЫ ПРАВИЛЬНЫХ ВОПРОСОВ ПО ПОЛЯМ:
-- core.careerLevel.code → "Какой уровень позиции: Junior, Middle, Senior, Lead или Director?"
-- workConditions.salary → "Какая зарплатная вилка для этой позиции?"
-- workConditions.location → "Где будет работать сотрудник и в каком формате?"
-- requirements.skills → "Какие ключевые навыки обязательны для этой роли?"
-- orgStructure.reportsTo → "Кому будет подчиняться этот сотрудник?"
-- hiringContext.businessProblem → "Какую бизнес-проблему должен решить этот человек?"
-- responsibilities.zones → "Какие основные зоны ответственности у этой роли?"
+1. АНАЛИЗ КОНТЕКСТА:
+   - Если ответ на вопрос УЖЕ ЯСЕН из контекста или истории Q-A — верни skip_reason
+   - Если вакансия remote — НЕ спрашивай про визу, релокацию, гражданство
+   - Если это техническая позиция (Developer, Engineer) — фокусируйся на технических аспектах
+   - Если это управленческая позиция (Director, Head, Lead) — фокусируйся на бизнес-задачах и масштабе
 
-СТРОГИЕ ПРАВИЛА:
-- Вопрос ПРЯМО относится к полю {field_path}
-- Варианты ответов — конкретные значения для этого поля
-- 10-15 слов максимум в варианте
-- БЕЗ абстрактных вопросов про "развитие" или "видение"
-- На русском
+2. АДАПТАЦИЯ ФОРМУЛИРОВКИ:
+   - Учитывай предыдущие ответы при формулировке вопроса
+   - Если пользователь уже упоминал что-то релевантное — ссылайся на это
+   - Формулируй вопрос в контексте КОНКРЕТНОЙ вакансии, а не абстрактно
 
-JSON: {{"question": "...", "options": [{{"value": "..."}}]}}"""
+3. ВАРИАНТЫ ОТВЕТОВ:
+   - Генерируй РОВНО 3 конкретных варианта, релевантных для ЭТОЙ вакансии
+   - Варианты должны отражать реальные опции для данной отрасли/позиции
+   - 10-15 слов максимум в варианте
+   - НЕ более 3 вариантов!
+
+4. КОГДА ПРОПУСТИТЬ ВОПРОС (skip_reason):
+   - Ответ очевиден из контекста (например, remote вакансия — виза не нужна)
+   - Информация уже была получена в другом вопросе
+   - Поле нерелевантно для данного типа вакансии
+
+ФОРМАТ ОТВЕТА (JSON):
+{{
+    "question": "Текст вопроса, адаптированный под контекст",
+    "options": [
+        {{"value": "Вариант 1", "description": "Пояснение если нужно"}},
+        {{"value": "Вариант 2"}}
+    ],
+    "skip_reason": null или "причина почему вопрос не нужен"
+}}
+
+ВАЖНО: Если skip_reason заполнен — question и options игнорируются."""
 
 
 ANSWER_PROCESSING_PROMPT = """Преобразуй ответ пользователя в структурированные данные для Executive Search вакансии.
@@ -390,6 +420,250 @@ ANSWER_PROCESSING_PROMPT = """Преобразуй ответ пользоват
 {{"value": [{{"milestone": "Провести аудит текущей инфраструктуры", "timeframe": "30_days", "measureOfSuccess": "Документ с findings и roadmap"}}]}}
 
 JSON:"""
+
+
+# ============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ ФОРМАТИРОВАНИЯ КОНТЕКСТА
+# ============================================================================
+
+
+def _format_vacancy_context(vacancy_data: dict[str, Any]) -> dict[str, str]:
+    """
+    Извлекает и форматирует ключевую информацию о вакансии для промпта.
+    
+    Args:
+        vacancy_data: Данные вакансии
+        
+    Returns:
+        Словарь с отформатированными полями контекста
+    """
+    # Извлекаем базовую информацию
+    job_title = _safe_get(vacancy_data, "core", "jobTitle") or "не указано"
+    
+    # career_level может быть строкой или dict
+    career_level_data = _safe_get(vacancy_data, "core", "careerLevel")
+    if isinstance(career_level_data, dict):
+        career_level = career_level_data.get("code") or "не указан"
+    elif isinstance(career_level_data, str):
+        career_level = career_level_data
+    else:
+        career_level = "не указан"
+    
+    # industry может быть строкой или dict
+    industry_data = _safe_get(vacancy_data, "core", "industry")
+    if isinstance(industry_data, dict):
+        industry = industry_data.get("name") or "не указана"
+    elif isinstance(industry_data, str):
+        industry = industry_data
+    else:
+        industry = "не указана"
+    
+    company_name = _safe_get(vacancy_data, "company", "name") or "не указана"
+    
+    # Локация и формат работы
+    location_data = _safe_get(vacancy_data, "workConditions", "location") or {}
+    if isinstance(location_data, dict):
+        location_parts = []
+        if location_data.get("city"):
+            location_parts.append(location_data["city"])
+        if location_data.get("country"):
+            location_parts.append(location_data["country"])
+        location = ", ".join(location_parts) if location_parts else "не указана"
+        remote_type = location_data.get("remote") or "не указан"
+    elif isinstance(location_data, str):
+        location = location_data
+        remote_type = "не указан"
+    else:
+        location = "не указана"
+        remote_type = "не указан"
+    
+    # Формируем summary уже известной информации
+    summary_parts = []
+    
+    # Бизнес-контекст
+    business_problem = _safe_get(vacancy_data, "hiringContext", "businessProblem")
+    if business_problem and isinstance(business_problem, str):
+        summary_parts.append(f"• Бизнес-проблема: {business_problem}")
+    
+    trigger_event = _safe_get(vacancy_data, "hiringContext", "triggerEvent")
+    if trigger_event:
+        if isinstance(trigger_event, dict):
+            event_type = trigger_event.get("type", "")
+            event_desc = trigger_event.get("description", "")
+            if event_type or event_desc:
+                summary_parts.append(f"• Причина открытия: {event_type} {event_desc}".strip())
+        elif isinstance(trigger_event, str):
+            summary_parts.append(f"• Причина открытия: {trigger_event}")
+    
+    expected_impact = _safe_get(vacancy_data, "hiringContext", "expectedImpact")
+    if expected_impact and isinstance(expected_impact, str):
+        summary_parts.append(f"• Ожидаемый результат: {expected_impact}")
+    
+    # Критерии успеха
+    milestones = _safe_get(vacancy_data, "successCriteria", "onboardingMilestones") or []
+    if milestones and isinstance(milestones, list):
+        milestone_texts = []
+        for m in milestones[:2]:
+            if isinstance(m, dict):
+                milestone_texts.append(m.get("milestone", ""))
+            elif isinstance(m, str):
+                milestone_texts.append(m)
+        if milestone_texts:
+            summary_parts.append(f"• Milestones: {'; '.join(filter(None, milestone_texts))}")
+    
+    # Дифференциаторы
+    industry_expertise = _safe_get(vacancy_data, "differentiators", "industryExpertise")
+    if industry_expertise:
+        if isinstance(industry_expertise, dict):
+            industries = industry_expertise.get("industries", [])
+            if industries and isinstance(industries, list):
+                summary_parts.append(f"• Требуемая экспертиза: {', '.join(str(i) for i in industries)}")
+        elif isinstance(industry_expertise, str):
+            summary_parts.append(f"• Требуемая экспертиза: {industry_expertise}")
+    
+    scale_exp = _safe_get(vacancy_data, "differentiators", "scaleExperience")
+    if scale_exp:
+        if isinstance(scale_exp, dict):
+            team_size = scale_exp.get("teamSize", {})
+            if isinstance(team_size, dict) and team_size:
+                min_val = team_size.get('min', '?')
+                summary_parts.append(f"• Масштаб опыта: команда {min_val}+ чел.")
+            elif isinstance(team_size, (int, str)):
+                summary_parts.append(f"• Масштаб опыта: команда {team_size}+ чел.")
+        elif isinstance(scale_exp, str):
+            summary_parts.append(f"• Масштаб опыта: {scale_exp}")
+    
+    # Dealbreakers
+    absolute_reqs = _safe_get(vacancy_data, "dealbreakers", "absoluteRequirements") or []
+    if absolute_reqs and isinstance(absolute_reqs, list):
+        reqs = []
+        for r in absolute_reqs[:2]:
+            if isinstance(r, dict):
+                reqs.append(r.get("requirement", ""))
+            elif isinstance(r, str):
+                reqs.append(r)
+        if reqs:
+            summary_parts.append(f"• Обязательные требования: {'; '.join(filter(None, reqs))}")
+    
+    # Навыки
+    skills = _safe_get(vacancy_data, "requirements", "skills") or []
+    if skills and isinstance(skills, list):
+        skill_names = []
+        for s in skills[:5]:
+            if isinstance(s, dict):
+                skill_names.append(s.get("name", ""))
+            elif isinstance(s, str):
+                skill_names.append(s)
+        if skill_names:
+            summary_parts.append(f"• Навыки: {', '.join(filter(None, skill_names))}")
+    
+    # Зарплата
+    salary = _safe_get(vacancy_data, "workConditions", "salary")
+    if salary:
+        if isinstance(salary, dict):
+            salary_min = salary.get("amountMin")
+            salary_max = salary.get("amountMax")
+            currency = salary.get("currency", "RUB")
+            if salary_min or salary_max:
+                salary_str = f"{salary_min or '?'} - {salary_max or '?'} {currency}"
+                summary_parts.append(f"• Зарплата: {salary_str}")
+        elif isinstance(salary, (str, int, float)):
+            summary_parts.append(f"• Зарплата: {salary}")
+    
+    vacancy_summary = "\n".join(summary_parts) if summary_parts else "Информация пока не собрана"
+    
+    return {
+        "job_title": job_title,
+        "career_level": career_level,
+        "industry": industry,
+        "company_name": company_name,
+        "location": location,
+        "remote_type": remote_type,
+        "vacancy_summary": vacancy_summary,
+    }
+
+
+def _format_qa_history(qa_history: list[dict[str, str]] | None) -> str:
+    """
+    Форматирует историю вопросов-ответов для промпта.
+    
+    Args:
+        qa_history: Список словарей с ключами question, answer, field_path
+        
+    Returns:
+        Отформатированная строка с историей Q-A
+    """
+    if not qa_history:
+        return "История пуста — это первый вопрос."
+    
+    # Берём последние 10 записей для контекста (чтобы не перегружать промпт)
+    recent_history = qa_history[-10:]
+    
+    formatted_items = []
+    for i, item in enumerate(recent_history, 1):
+        question = item.get("question", "")
+        answer = item.get("answer", "")
+        
+        # Сокращаем длинные ответы
+        if len(answer) > 100:
+            answer = answer[:100] + "..."
+        
+        formatted_items.append(f"{i}. В: {question}\n   О: {answer}")
+    
+    return "\n".join(formatted_items)
+
+
+def _should_skip_field_by_context(
+    field_path: str,
+    vacancy_data: dict[str, Any],
+    qa_history: list[dict[str, str]] | None,
+) -> str | None:
+    """
+    Проверяет, нужно ли пропустить поле на основе контекста (без вызова LLM).
+    
+    Быстрая проверка очевидных случаев перед вызовом LLM.
+    
+    Args:
+        field_path: Путь к полю
+        vacancy_data: Данные вакансии
+        qa_history: История Q-A
+        
+    Returns:
+        Причина пропуска или None если вопрос нужен
+    """
+    # Проверяем формат работы для полей, связанных с локацией
+    location = _safe_get(vacancy_data, "workConditions", "location") or {}
+    if isinstance(location, dict):
+        remote_type = location.get("remote", "")
+    elif isinstance(location, str):
+        remote_type = "remote" if "remote" in location.lower() else ""
+    else:
+        remote_type = ""
+    
+    # Для remote вакансий пропускаем вопросы о визе/релокации
+    if remote_type == "remote":
+        skip_for_remote = [
+            "dealbreakers.absoluteRequirements",  # Часто содержит вопросы о визе
+        ]
+        # Не пропускаем полностью, но помечаем для LLM
+        # LLM сам решит, нужен ли вопрос о других absolute requirements
+    
+    # Если уже есть ответ в истории на похожий вопрос
+    if qa_history:
+        # Извлекаем field_path из истории
+        answered_fields = {item.get("field_path") for item in qa_history if item.get("field_path")}
+        
+        # Проверяем связанные поля
+        related_fields_map = {
+            "hiringContext.expectedImpact": ["hiringContext.businessProblem"],
+            "successCriteria.shortTermKPIs": ["successCriteria.onboardingMilestones"],
+            "differentiators.scaleExperience": ["differentiators.industryExpertise"],
+        }
+        
+        # Если есть связанные поля и они не заполнены — не пропускаем, а ждём
+        # Эта логика уже есть в depends_on, так что здесь просто возвращаем None
+    
+    return None
 
 
 class EnrichmentService:
@@ -465,6 +739,7 @@ class EnrichmentService:
         self,
         vacancy_data: dict[str, Any],
         asked_fields: list[str] | None = None,
+        qa_history: list[dict[str, str]] | None = None,
     ) -> EnrichmentQuestion | None:
         """
         Определяет следующее незаполненное поле и генерирует вопрос.
@@ -472,11 +747,13 @@ class EnrichmentService:
         Args:
             vacancy_data: Текущие данные вакансии
             asked_fields: Поля, по которым уже задавали вопросы (включая пропущенные)
+            qa_history: История вопросов-ответов для контекста
 
         Returns:
             EnrichmentQuestion или None если все поля заполнены
         """
         asked_fields = asked_fields or []
+        qa_history = qa_history or []
 
         # Находим первое незаполненное поле по приоритету
         for field_info in FIELD_PRIORITIES:
@@ -500,16 +777,18 @@ class EnrichmentService:
                 if dep_field and not dep_field["check"](vacancy_data):
                     continue
 
-            # Генерируем вопрос через LLM
+            # Генерируем вопрос через LLM с контекстом
             try:
                 question = await self._generate_question(
                     vacancy_data=vacancy_data,
                     field_path=field_path,
                     field_description=field_info["description"],
+                    qa_history=qa_history,
                 )
                 if question:
                     question.depends_on = depends_on
                     return question
+                # Если LLM вернул None (skip) — продолжаем к следующему полю
             except Exception as e:
                 logger.error(f"Failed to generate question for {field_path}: {e}")
                 continue
@@ -610,10 +889,12 @@ class EnrichmentService:
             if not field_info:
                 return None
             try:
+                # Передаём qa_history для контекстно-зависимой генерации
                 question = await self._generate_question(
                     vacancy_data=vacancy_data,
                     field_path=field_path,
                     field_description=field_info["description"],
+                    qa_history=qa_history,
                 )
                 if question:
                     question.depends_on = field_info.get("depends_on")
@@ -632,6 +913,37 @@ class EnrichmentService:
         for result in results:
             if isinstance(result, EnrichmentQuestion):
                 questions.append(result)
+        
+        # Если все вопросы были пропущены LLM — пробуем взять следующие поля
+        if not questions and len(candidates) > len(selected_fields):
+            # Есть ещё кандидаты — пробуем следующую порцию
+            remaining_candidates = [
+                c for c in candidates 
+                if c["path"] not in selected_fields
+            ]
+            
+            # Выбираем следующие независимые поля
+            next_selected: list[str] = []
+            for candidate in remaining_candidates:
+                if len(next_selected) >= max_questions:
+                    break
+                field_path = candidate["path"]
+                is_independent = all(
+                    _are_fields_independent(field_path, selected)
+                    for selected in next_selected
+                )
+                if is_independent:
+                    next_selected.append(field_path)
+            
+            # Генерируем вопросы для следующих полей
+            if next_selected:
+                next_results = await asyncio.gather(
+                    *[generate_for_field(fp) for fp in next_selected],
+                    return_exceptions=True,
+                )
+                for result in next_results:
+                    if isinstance(result, EnrichmentQuestion):
+                        questions.append(result)
 
         return questions
 
@@ -652,12 +964,16 @@ class EnrichmentService:
         Returns:
             Обновлённые данные вакансии
         """
+        logger.info(f"[PROCESS_ANSWER] Processing answer for field: {field_path}")
+        logger.info(f"[PROCESS_ANSWER] Answer received: {answer[:100]}..." if len(answer) > 100 else f"[PROCESS_ANSWER] Answer received: {answer}")
+        
         try:
             processed_value = await self._process_answer_with_llm(
                 vacancy_data=vacancy_data,
                 field_path=field_path,
                 answer=answer,
             )
+            logger.info(f"[PROCESS_ANSWER] LLM processed value for {field_path}: {processed_value}")
 
             # Обновляем данные вакансии
             updated_data = self._update_vacancy_data(
@@ -665,11 +981,20 @@ class EnrichmentService:
                 field_path=field_path,
                 value=processed_value,
             )
+            
+            # Проверяем что данные действительно обновились
+            parts = field_path.split(".")
+            check_value = updated_data
+            for part in parts:
+                check_value = check_value.get(part) if isinstance(check_value, dict) else None
+            logger.info(f"[PROCESS_ANSWER] Field {field_path} after update: {check_value}")
 
             return updated_data
 
         except Exception as e:
-            logger.error(f"Failed to process answer for {field_path}: {e}")
+            logger.error(f"[PROCESS_ANSWER] Failed to process answer for {field_path}: {e}")
+            import traceback
+            logger.error(f"[PROCESS_ANSWER] Traceback: {traceback.format_exc()}")
             # В случае ошибки пробуем простое присвоение
             return self._update_vacancy_data(
                 vacancy_data=vacancy_data,
@@ -682,16 +1007,44 @@ class EnrichmentService:
         vacancy_data: dict[str, Any],
         field_path: str,
         field_description: str,
+        qa_history: list[dict[str, str]] | None = None,
     ) -> EnrichmentQuestion | None:
-        """Генерирует вопрос через LLM для Executive Search."""
-        # Извлекаем job_title для контекста
-        job_title = _safe_get(vacancy_data, "core", "jobTitle") or "не указано"
-
-        prompt = QUESTION_GENERATION_PROMPT.format(
-            vacancy_data=json.dumps(vacancy_data, ensure_ascii=False, indent=2),
+        """
+        Генерирует контекстно-зависимый вопрос через LLM для Executive Search.
+        
+        Args:
+            vacancy_data: Текущие данные вакансии
+            field_path: Путь к полю для заполнения
+            field_description: Описание поля
+            qa_history: История предыдущих вопросов-ответов
+            
+        Returns:
+            EnrichmentQuestion или None если вопрос пропущен/ошибка
+        """
+        # Быстрая проверка контекста без LLM
+        skip_reason = _should_skip_field_by_context(field_path, vacancy_data, qa_history)
+        if skip_reason:
+            logger.info(f"Skipping field {field_path}: {skip_reason}")
+            return None
+        
+        # Форматируем контекст вакансии
+        context = _format_vacancy_context(vacancy_data)
+        
+        # Форматируем историю Q-A
+        qa_history_formatted = _format_qa_history(qa_history)
+        
+        # Формируем промпт с полным контекстом
+        prompt = CONTEXT_AWARE_QUESTION_PROMPT.format(
+            job_title=context["job_title"],
+            career_level=context["career_level"],
+            industry=context["industry"],
+            company_name=context["company_name"],
+            location=context["location"],
+            remote_type=context["remote_type"],
+            vacancy_summary=context["vacancy_summary"],
+            qa_history_formatted=qa_history_formatted,
             field_path=field_path,
             field_description=field_description,
-            job_title=job_title,
         )
 
         response = await self._call_llm(prompt)
@@ -700,6 +1053,14 @@ class EnrichmentService:
 
         try:
             data = json.loads(response)
+            
+            # Проверяем, рекомендует ли LLM пропустить вопрос
+            skip_reason = data.get("skip_reason")
+            if skip_reason:
+                logger.info(f"LLM recommends skipping field {field_path}: {skip_reason}")
+                return None
+            
+            # Извлекаем варианты ответов
             options = [
                 EnrichmentOption(
                     value=opt.get("value", ""),
@@ -707,15 +1068,30 @@ class EnrichmentService:
                 )
                 for opt in data.get("options", [])
             ]
+            
+            # Фильтруем пустые варианты
+            options = [opt for opt in options if opt.value.strip()]
+            
+            # Ограничиваем до 3 вариантов ответа
+            options = options[:3]
+            
+            # Если нет вариантов — не создаём вопрос
+            if not options:
+                logger.warning(f"No valid options for field {field_path}")
+                return None
+
+            question_text = data.get("question", "").strip()
+            if not question_text:
+                question_text = f"Укажите значение для {field_path}"
 
             return EnrichmentQuestion(
                 field_path=field_path,
-                question_text=data.get("question", f"Укажите значение для {field_path}"),
+                question_text=question_text,
                 options=options,
                 allow_custom=True,
             )
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response: {e}")
+            logger.error(f"Failed to parse LLM response for {field_path}: {e}")
             return None
 
     async def _process_answer_with_llm(

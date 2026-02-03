@@ -516,6 +516,10 @@ async def submit_answer(
 
     Сохраняет Q-A историю и возвращает следующие вопросы.
     """
+    logger.info(f"[SUBMIT_ANSWER] Received answer for field: {request.field_path}")
+    logger.info(f"[SUBMIT_ANSWER] Answer: {request.answer[:100]}..." if len(request.answer) > 100 else f"[SUBMIT_ANSWER] Answer: {request.answer}")
+    logger.info(f"[SUBMIT_ANSWER] Skip: {request.skip}")
+    
     session = await session_service.get_session(session_id, user_id)
 
     if session is None:
@@ -533,6 +537,8 @@ async def submit_answer(
     # Получаем текущие данные из сессии
     asked_fields = session.parsed_data.get("_asked_fields") or []
     qa_history = session.parsed_data.get("_qa_history") or []
+    
+    logger.info(f"[SUBMIT_ANSWER] Current asked_fields: {asked_fields}")
     
     if request.field_path not in asked_fields:
         asked_fields.append(request.field_path)
@@ -552,6 +558,7 @@ async def submit_answer(
     # Если не пропуск - обрабатываем ответ
     if not request.skip:
         try:
+            logger.info(f"[SUBMIT_ANSWER] Processing answer for {request.field_path}...")
             updated_data = await enrichment_service.process_answer(
                 vacancy_data=updated_data,
                 field_path=request.field_path,
@@ -560,21 +567,28 @@ async def submit_answer(
             # Сохраняем метаданные
             updated_data["_asked_fields"] = asked_fields
             updated_data["_qa_history"] = qa_history
+            logger.info(f"[SUBMIT_ANSWER] Answer processed successfully for {request.field_path}")
         except Exception as e:
+            logger.error(f"[SUBMIT_ANSWER] Failed to process answer: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to process answer: {str(e)}",
             )
+    else:
+        logger.info(f"[SUBMIT_ANSWER] Skipped field {request.field_path}")
 
     # Обновляем сессию
+    logger.info(f"[SUBMIT_ANSWER] Updating session with new data...")
     session = await session_service.update_session(
         session_id,
         user_id,
         parsed_data=updated_data,
         status=SessionStatus.CLARIFYING,
     )
+    logger.info(f"[SUBMIT_ANSWER] Session updated successfully")
 
     completion_percent = session.get_completion_percent()
+    logger.info(f"[SUBMIT_ANSWER] Completion percent: {completion_percent}%")
 
     # Генерируем до 2 вопросов с учётом истории
     next_questions_response: list[EnrichmentQuestionResponse] = []
@@ -630,6 +644,12 @@ async def batch_submit_answers(
 
     Сохраняет Q-A историю для контекста следующих вопросов.
     """
+    logger.info(f"[BATCH_ANSWER] Received {len(request.answers)} answers")
+    logger.info(f"[BATCH_ANSWER] Priority categories: {request.priority_categories}")
+    
+    for i, ans in enumerate(request.answers):
+        logger.info(f"[BATCH_ANSWER] Answer {i+1}: field={ans.field_path}, skip={ans.skip}, answer={ans.answer[:50] if ans.answer else 'empty'}...")
+    
     session = await session_service.get_session(session_id, user_id)
 
     if session is None:
@@ -648,11 +668,15 @@ async def batch_submit_answers(
     asked_fields = session.parsed_data.get("_asked_fields") or []
     qa_history = session.parsed_data.get("_qa_history") or []
     updated_data = session.parsed_data.copy()
+    
+    logger.info(f"[BATCH_ANSWER] Current asked_fields before processing: {asked_fields}")
 
     processed_count = 0
 
     # Обрабатываем все ответы последовательно
     for answer_item in request.answers:
+        logger.info(f"[BATCH_ANSWER] Processing field: {answer_item.field_path}")
+        
         # Добавляем поле в список спрошенных
         if answer_item.field_path not in asked_fields:
             asked_fields.append(answer_item.field_path)
@@ -668,30 +692,43 @@ async def batch_submit_answers(
         # Если не пропуск - обрабатываем ответ
         if not answer_item.skip and answer_item.answer:
             try:
+                logger.info(f"[BATCH_ANSWER] Calling process_answer for {answer_item.field_path}")
                 updated_data = await enrichment_service.process_answer(
                     vacancy_data=updated_data,
                     field_path=answer_item.field_path,
                     answer=answer_item.answer,
                 )
+                logger.info(f"[BATCH_ANSWER] Successfully processed {answer_item.field_path}")
             except Exception as e:
-                logger.error(f"Failed to process answer for {answer_item.field_path}: {e}")
+                logger.error(f"[BATCH_ANSWER] Failed to process answer for {answer_item.field_path}: {e}")
+                import traceback
+                logger.error(f"[BATCH_ANSWER] Traceback: {traceback.format_exc()}")
                 # Продолжаем с остальными ответами
+        else:
+            logger.info(f"[BATCH_ANSWER] Skipped field {answer_item.field_path} (skip={answer_item.skip}, has_answer={bool(answer_item.answer)})")
 
         processed_count += 1
 
     # Сохраняем метаданные
     updated_data["_asked_fields"] = asked_fields
     updated_data["_qa_history"] = qa_history
+    
+    # Логируем состояние successCriteria после обработки
+    success_criteria = updated_data.get("successCriteria", {})
+    logger.info(f"[BATCH_ANSWER] successCriteria after processing: {success_criteria}")
 
     # Обновляем сессию один раз после всех ответов
+    logger.info(f"[BATCH_ANSWER] Updating session...")
     session = await session_service.update_session(
         session_id,
         user_id,
         parsed_data=updated_data,
         status=SessionStatus.CLARIFYING,
     )
+    logger.info(f"[BATCH_ANSWER] Session updated successfully")
 
     completion_percent = session.get_completion_percent()
+    logger.info(f"[BATCH_ANSWER] Completion percent: {completion_percent}%")
 
     # Генерируем новые вопросы с учётом истории и категорий
     next_questions_response: list[EnrichmentQuestionResponse] = []

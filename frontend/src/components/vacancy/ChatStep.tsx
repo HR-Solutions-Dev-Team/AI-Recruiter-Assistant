@@ -618,16 +618,61 @@ export default function ChatStep({
 
         {/* Complete State */}
         {isComplete && (
-          <div className="border-t border-gray-200 p-4 bg-gray-50/50">
-            <button
-              onClick={onNext}
-              className="w-full flex items-center justify-center gap-2 px-6 py-3
-                         bg-green-600 text-white rounded-xl font-medium text-sm
-                         hover:bg-green-700 sidebar-transition"
-            >
-              Перейти к редактированию
-              <ArrowRight size={18} strokeWidth={2} />
-            </button>
+          <div className="border-t border-gray-200 p-4 bg-gray-50/50 space-y-3">
+            {completionPercent < COMPLETION_THRESHOLD ? (
+              <>
+                {/* Предупреждение о низкой заполненности */}
+                <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-lg flex items-start gap-2">
+                  <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                  <span>
+                    Заполненность вакансии {completionPercent}% — ниже рекомендуемых {COMPLETION_THRESHOLD}%. 
+                    Чем больше деталей, тем точнее будет поиск кандидатов.
+                  </span>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setIsComplete(false);
+                      // Перезапускаем загрузку вопросов с выбранными категориями
+                      loadInitialQuestions(selectedCategories.length > 0 ? selectedCategories : undefined, true);
+                    }}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3
+                               bg-blue-600 text-white rounded-xl font-medium text-sm
+                               hover:bg-blue-700 sidebar-transition"
+                  >
+                    Продолжить общение
+                  </button>
+                  <button
+                    onClick={onNext}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3
+                               border border-gray-300 bg-white text-gray-700 rounded-xl font-medium text-sm
+                               hover:bg-gray-50 sidebar-transition"
+                  >
+                    Завершить
+                    <ArrowRight size={18} strokeWidth={2} />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Успешное завершение */}
+                <div className="text-sm text-green-600 bg-green-50 p-3 rounded-lg flex items-start gap-2">
+                  <CheckCircle size={16} className="mt-0.5 flex-shrink-0" />
+                  <span>
+                    Отлично! Заполненность {completionPercent}% — достаточно для качественного поиска.
+                  </span>
+                </div>
+                <button
+                  onClick={onNext}
+                  className="w-full flex items-center justify-center gap-2 px-6 py-3
+                             bg-green-600 text-white rounded-xl font-medium text-sm
+                             hover:bg-green-700 sidebar-transition"
+                >
+                  Перейти к редактированию
+                  <ArrowRight size={18} strokeWidth={2} />
+                </button>
+              </>
+            )}
           </div>
         )}
 
