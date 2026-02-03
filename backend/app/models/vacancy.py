@@ -985,11 +985,15 @@ class ParseVacancyRequest(BaseModel):
 class ParseVacancyResponse(BaseModel):
     """Ответ с распарсенной вакансией"""
 
-    data: VacancyInput = Field(..., description="Распарсенные данные")
+    data: Optional[VacancyInput] = Field(None, description="Распарсенные данные (None если невалидно)")
     confidence: float = Field(..., ge=0, le=1, description="Уверенность парсера (0-1)")
     warnings: Optional[list[str]] = Field(None, description="Предупреждения при парсинге")
     missing_fields: Optional[list[str]] = Field(
         None, alias="missingFields", description="Поля, которые не удалось извлечь"
+    )
+    is_valid: bool = Field(True, alias="isValid", description="Валидность документа как вакансии")
+    validation_error: Optional[str] = Field(
+        None, alias="validationError", description="Причина невалидности"
     )
 
     class Config:

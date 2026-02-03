@@ -14,10 +14,12 @@ export interface ParseResponse {
   session_id: string;
   status: string;
   completion_percent: number;
-  parsed_data: VacancyInput;
+  parsed_data: VacancyInput | null;
   confidence: number;
   warnings: string[] | null;
   missing_fields: string[] | null;
+  is_valid: boolean;
+  validation_error: string | null;
 }
 
 export interface SessionResponse {

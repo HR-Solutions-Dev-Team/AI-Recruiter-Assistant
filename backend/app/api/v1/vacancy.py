@@ -57,10 +57,12 @@ class ParseResponse(BaseModel):
     session_id: str
     status: str
     completion_percent: int
-    parsed_data: dict[str, Any]
+    parsed_data: dict[str, Any] | None = None
     confidence: float
     warnings: list[str] | None = None
     missing_fields: list[str] | None = None
+    is_valid: bool = True
+    validation_error: str | None = None
 
 
 class EnrichmentOptionResponse(BaseModel):
@@ -251,7 +253,19 @@ async def upload_text(
             hints=request.hints,
         )
 
-        # Обновляем сессию
+        # Проверяем валидность документа
+        if not result.is_valid:
+            return ParseResponse(
+                session_id=session_id,
+                status="invalid",
+                completion_percent=0,
+                parsed_data=None,
+                confidence=0.0,
+                is_valid=False,
+                validation_error=result.validation_error or "По предоставленным данным нельзя сформировать вакансию",
+            )
+
+        # Обновляем сессию только для валидных данных
         session = await session_service.update_session(
             session_id,
             user_id,
@@ -271,6 +285,7 @@ async def upload_text(
             confidence=session.confidence,
             warnings=session.warnings,
             missing_fields=session.missing_fields,
+            is_valid=True,
         )
 
     except ValueError as e:
@@ -329,7 +344,19 @@ async def upload_file(
             hints=hints_dict,
         )
 
-        # Обновляем сессию
+        # Проверяем валидность документа
+        if not result.is_valid:
+            return ParseResponse(
+                session_id=session_id,
+                status="invalid",
+                completion_percent=0,
+                parsed_data=None,
+                confidence=0.0,
+                is_valid=False,
+                validation_error=result.validation_error or "По предоставленным данным нельзя сформировать вакансию",
+            )
+
+        # Обновляем сессию только для валидных данных
         session = await session_service.update_session(
             session_id,
             user_id,
@@ -349,6 +376,7 @@ async def upload_file(
             confidence=session.confidence,
             warnings=session.warnings,
             missing_fields=session.missing_fields,
+            is_valid=True,
         )
 
     except FileParserError as e:

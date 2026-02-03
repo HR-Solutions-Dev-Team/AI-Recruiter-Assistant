@@ -1,8 +1,57 @@
 import { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { Upload, Type, AlertCircle, File, X, Info, ArrowRight } from 'lucide-react';
+import { Upload, Type, AlertCircle, File, X, Info, ArrowRight, XCircle } from 'lucide-react';
 import { createSession, uploadText, uploadFile, type ParseResponse } from '../../api';
 import type { VacancyInput } from '../../types/vacancy';
 import AnalyzingAnimation from './AnalyzingAnimation';
+
+// Компонент модального окна для невалидного документа
+interface ValidationErrorModalProps {
+  isOpen: boolean;
+  message: string;
+  onClose: () => void;
+}
+
+function ValidationErrorModal({ isOpen, message, onClose }: ValidationErrorModalProps) {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      
+      {/* Modal */}
+      <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6 animate-in fade-in zoom-in duration-200">
+        <div className="flex flex-col items-center text-center">
+          {/* Icon */}
+          <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+            <XCircle size={32} className="text-red-600" />
+          </div>
+          
+          {/* Title */}
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            Невозможно создать вакансию
+          </h3>
+          
+          {/* Message */}
+          <p className="text-gray-600 mb-6">
+            {message}
+          </p>
+          
+          {/* Button */}
+          <button
+            onClick={onClose}
+            className="w-full px-6 py-3 bg-gray-900 text-white rounded-xl font-medium hover:bg-gray-800 transition-colors"
+          >
+            Понятно
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 type InputMode = 'file' | 'text';
 
@@ -29,6 +78,10 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Состояние для модального окна валидации
+  const [showValidationModal, setShowValidationModal] = useState(false);
+  const [validationError, setValidationError] = useState<string>('');
 
   const validateFile = (file: File): string | null => {
     if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(pdf|docx?|txt)$/i)) {
@@ -111,6 +164,17 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
         result = await uploadText(session.session_id, text);
       }
 
+      // Проверяем валидность документа
+      if (!result.is_valid || !result.parsed_data) {
+        setIsLoading(false);
+        setValidationError(
+          result.validation_error || 
+          'По предоставленным данным нельзя сформировать вакансию. Попробуйте загрузить еще раз или изменить запрос.'
+        );
+        setShowValidationModal(true);
+        return;
+      }
+
       // Сохраняем parsed_data напрямую как VacancyInput
       setVacancyData(result.parsed_data);
 
@@ -120,6 +184,17 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Произошла ошибка при обработке');
       setIsLoading(false);
+    }
+  };
+
+  const handleCloseValidationModal = () => {
+    setShowValidationModal(false);
+    setValidationError('');
+    // Очищаем поля ввода
+    setFile(null);
+    setText('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -317,6 +392,13 @@ export default function UploadStep({ onNext, setVacancyData }: UploadStepProps) 
           <ArrowRight size={18} strokeWidth={2} />
         </button>
       </div>
+
+      {/* Модальное окно ошибки валидации */}
+      <ValidationErrorModal
+        isOpen={showValidationModal}
+        message={validationError}
+        onClose={handleCloseValidationModal}
+      />
     </div>
   );
 }

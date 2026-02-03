@@ -15,13 +15,25 @@ from app.models.vacancy import ParseVacancyResponse, VacancyInput
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_PROMPT = """Ты — эксперт по HR и рекрутингу. Твоя задача — извлечь структурированные данные из текста вакансии.
+SYSTEM_PROMPT = """Ты — эксперт по HR и рекрутингу. Твоя задача — определить тип документа и извлечь структурированные данные.
+
+ШАГ 1: ОПРЕДЕЛИ ТИП ДОКУМЕНТА
+- "vacancy" — описание вакансии (требования к кандидату, обязанности, условия работы)
+- "resume" — резюме кандидата (опыт работы, навыки, образование человека)
+- "invalid" — текст НЕ связан с наймом (стихи, статьи, рецепты, случайный текст и т.д.)
+
+ШАГ 2: ДЕЙСТВИЯ ПО ТИПУ
+- vacancy: извлеки данные по схеме ниже
+- resume: извлеки jobTitle из желаемой позиции или последней должности
+- invalid: верни {"_documentType": "invalid", "_rejectionReason": "причина"}
 
 ВАЖНО: Этот сервис предназначен для поиска РЕДКИХ и УЗКОСПЕЦИАЛИЗИРОВАННЫХ специалистов (5-10 кандидатов на вакансию), поэтому важна максимальная детализация.
 
-Верни JSON строго по следующей схеме (все поля опциональны кроме core.jobTitle):
+Верни JSON строго по следующей схеме. ОБЯЗАТЕЛЬНЫЕ ПОЛЯ: _documentType и core.jobTitle (для vacancy/resume):
 
 {
+  "_documentType": "vacancy|resume|invalid",
+  "_rejectionReason": "string (только если invalid) — причина почему это не вакансия",
   "core": {
     "jobTitle": "string (ОБЯЗАТЕЛЬНО) — название должности",
     "synonyms": ["string"] — альтернативные названия роли,
@@ -124,15 +136,22 @@ SYSTEM_PROMPT = """Ты — эксперт по HR и рекрутингу. Тв
 }
 
 ПРАВИЛА:
-1. Извлекай ТОЛЬКО то, что явно указано в тексте. Не додумывай.
-2. Если информация отсутствует — не включай поле в ответ.
-3. Для навыков определяй категорию:
+1. СНАЧАЛА определи _documentType. Это ОБЯЗАТЕЛЬНО.
+2. Если _documentType="invalid" — верни ТОЛЬКО {"_documentType": "invalid", "_rejectionReason": "..."}.
+3. Извлекай ТОЛЬКО то, что явно указано в тексте. Не додумывай.
+4. Если информация отсутствует — не включай поле в ответ.
+5. Для навыков определяй категорию:
    - hard: технические навыки (языки программирования, фреймворки, инструменты)
    - soft: мягкие навыки (коммуникация, критическое мышление)
    - management: управленческие навыки (менторство, планирование, найм)
    - digital_tool: цифровые инструменты (Jira, Figma, Notion)
-4. Определяй isRequired=true для must-have требований, false для nice-to-have.
-5. Отвечай ТОЛЬКО валидным JSON без markdown-обёртки."""
+6. Определяй isRequired=true для must-have требований, false для nice-to-have.
+7. Отвечай ТОЛЬКО валидным JSON без markdown-обёртки.
+
+ПРИМЕРЫ INVALID:
+- "Привет, как дела?" — не связано с наймом
+- Стихотворения, рецепты, новости — не связано с наймом
+- Текст без упоминания должности, навыков или требований — не вакансия"""
 
 
 class VacancyParserService:
@@ -163,7 +182,27 @@ class VacancyParserService:
         try:
             raw_response = await self._call_llm(user_prompt)
             parsed_data = self._parse_llm_response(raw_response)
-            return self._build_response(parsed_data, text)
+            
+            # Проверяем тип документа
+            doc_type = parsed_data.get("_documentType", "vacancy")
+            
+            if doc_type == "invalid":
+                rejection_reason = parsed_data.get(
+                    "_rejectionReason",
+                    "Текст не является описанием вакансии"
+                )
+                return ParseVacancyResponse(
+                    data=None,
+                    confidence=0.0,
+                    is_valid=False,
+                    validation_error=rejection_reason,
+                )
+            
+            # Удаляем служебные поля перед валидацией
+            parsed_data.pop("_documentType", None)
+            parsed_data.pop("_rejectionReason", None)
+            
+            return self._build_response(parsed_data, text, doc_type)
         except Exception as e:
             logger.error(f"Failed to parse vacancy: {e}")
             raise
@@ -252,13 +291,26 @@ class VacancyParserService:
         self,
         parsed_data: dict[str, Any],
         original_text: str,
+        doc_type: str = "vacancy",
     ) -> ParseVacancyResponse:
         """Строит ответ с валидацией и метриками."""
         warnings: list[str] = []
         missing_fields: list[str] = []
 
         if "core" not in parsed_data or "jobTitle" not in parsed_data.get("core", {}):
-            raise ValueError("Missing required field: core.jobTitle")
+            # Документ не содержит jobTitle — невалидный
+            return ParseVacancyResponse(
+                data=None,
+                confidence=0.0,
+                is_valid=False,
+                validation_error="Не удалось определить название должности из предоставленного текста",
+            )
+        
+        # Добавляем предупреждение если это было резюме
+        if doc_type == "resume":
+            warnings.append(
+                "Документ определён как резюме. Извлечено название позиции из желаемой должности."
+            )
 
         recommended_fields = [
             ("core.careerLevel", parsed_data.get("core", {}).get("careerLevel")),
@@ -288,6 +340,8 @@ class VacancyParserService:
             confidence=confidence,
             warnings=warnings if warnings else None,
             missing_fields=missing_fields if missing_fields else None,
+            is_valid=True,
+            validation_error=None,
         )
 
     def _calculate_confidence(self, data: dict[str, Any]) -> float:

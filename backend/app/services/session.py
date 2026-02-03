@@ -38,154 +38,89 @@ class VacancySession(BaseModel):
 
     def get_completion_percent(self) -> int:
         """
-        Вычисляет процент заполненности вакансии.
-
-        Учитывает:
-        - core (обязательно): 30%
-        - requirements.skills: 25%
-        - workConditions: 15%
-        - responsibilities: 15%
-        - company: 10%
-        - orgStructure: 5%
+        Вычисляет процент заполненности вакансии динамически.
+        
+        Каждое заполненное поле даёт свою долю процента.
+        Учитывает Executive Search поля (hiringContext, successCriteria и т.д.)
         """
         if not self.parsed_data:
             return 0
-
-        scores = {
-            "core": (30, self._check_core),
-            "skills": (25, self._check_skills),
-            "work_conditions": (15, self._check_work_conditions),
-            "responsibilities": (15, self._check_responsibilities),
-            "company": (10, self._check_company),
-            "org_structure": (5, self._check_org_structure),
+        
+        # Определяем все поля и их веса
+        # Общий вес = 100%, распределён по важности для Executive Search
+        field_weights = {
+            # Core (15% total)
+            "core.jobTitle": 10,
+            "core.careerLevel": 3,
+            "core.industry": 2,
+            
+            # Business Context (20% total) - критично для exec search
+            "hiringContext.businessProblem": 8,
+            "hiringContext.triggerEvent": 6,
+            "hiringContext.expectedImpact": 6,
+            
+            # Success Criteria (15% total)
+            "successCriteria.onboardingMilestones": 8,
+            "successCriteria.shortTermKPIs": 7,
+            
+            # Ideal Candidate (15% total)
+            "differentiators.industryExpertise": 5,
+            "differentiators.scaleExperience": 4,
+            "differentiators.achievementMarkers": 4,
+            "differentiators.companyBackground": 2,
+            
+            # Requirements (15% total)
+            "dealbreakers.absoluteRequirements": 5,
+            "dealbreakers.experienceMinimums": 4,
+            "dealbreakers.nonNegotiables": 3,
+            "requirements.skills": 3,
+            
+            # Responsibilities (10% total)
+            "responsibilities.criticalTasks": 5,
+            "responsibilities.zones": 5,
+            
+            # Work Conditions (5% total)
+            "workConditions.salary": 2,
+            "workConditions.location": 3,
+            
+            # Company/Org (5% total)
+            "company.name": 2,
+            "orgStructure.reportsTo": 3,
         }
-
-        total = 0
-        for _name, (weight, checker) in scores.items():
-            score = checker()
-            total += weight * score
-
-        return int(total)
-
-    def _check_core(self) -> float:
-        """Проверяет заполненность core блока."""
+        
+        total_score = 0
+        
+        for field_path, weight in field_weights.items():
+            if self._is_field_filled(field_path):
+                total_score += weight
+        
+        return min(int(total_score), 100)
+    
+    def _is_field_filled(self, field_path: str) -> bool:
+        """Проверяет, заполнено ли поле."""
         if not self.parsed_data:
-            return 0
-
-        core = self.parsed_data.get("core") or {}
-        if not core.get("jobTitle"):
-            return 0
-
-        filled = 1  # jobTitle есть
-        if core.get("careerLevel"):
-            filled += 1
-        if core.get("industry"):
-            filled += 1
-        if core.get("synonyms"):
-            filled += 0.5
-
-        return min(filled / 3, 1.0)
-
-    def _check_skills(self) -> float:
-        """Проверяет заполненность навыков."""
-        if not self.parsed_data:
-            return 0
-
-        requirements = self.parsed_data.get("requirements") or {}
-        skills = requirements.get("skills") or []
-
-        if not skills:
-            return 0
-
-        # Минимум 5 навыков для 100%
-        return min(len(skills) / 5, 1.0)
-
-    def _check_work_conditions(self) -> float:
-        """Проверяет заполненность условий работы."""
-        if not self.parsed_data:
-            return 0
-
-        wc = self.parsed_data.get("workConditions") or {}
-        if not wc:
-            return 0
-
-        filled = 0
-        if wc.get("salary"):
-            filled += 1
-        if wc.get("location"):
-            filled += 1
-        if wc.get("employmentType"):
-            filled += 0.5
-        if wc.get("schedule"):
-            filled += 0.5
-
-        return min(filled / 3, 1.0)
-
-    def _check_responsibilities(self) -> float:
-        """Проверяет заполненность обязанностей."""
-        if not self.parsed_data:
-            return 0
-
-        resp = self.parsed_data.get("responsibilities") or {}
-        if not resp:
-            return 0
-
-        zones = resp.get("zones") or []
-        if not zones:
-            return 0
-
-        # Минимум 3 зоны для 100%
-        return min(len(zones) / 3, 1.0)
-
-    def _check_company(self) -> float:
-        """Проверяет заполненность информации о компании."""
-        if not self.parsed_data:
-            return 0
-
-        company = self.parsed_data.get("company") or {}
-        if not company.get("name"):
-            return 0
-
-        filled = 1  # name есть
-        if company.get("type"):
-            filled += 0.5
-        if company.get("size"):
-            filled += 0.5
-        filled += self._check_activity_sphere(company.get("activitySphere"))
-
-        return min(filled / 3, 1.0)
-
-    def _check_activity_sphere(self, activity_sphere: dict | None) -> float:
-        """Проверяет заполненность сферы деятельности."""
-        if not activity_sphere:
-            return 0
-
-        score = 0.0
-        if activity_sphere.get("sphere"):
-            score += 0.4
-        if activity_sphere.get("subSphere"):
-            score += 0.3
-        if activity_sphere.get("specialization"):
-            score += 0.3
-
-        return score
-
-    def _check_org_structure(self) -> float:
-        """Проверяет заполненность оргструктуры."""
-        if not self.parsed_data:
-            return 0
-
-        org = self.parsed_data.get("orgStructure") or {}
-        if not org:
-            return 0
-
-        filled = 0
-        if org.get("reportsTo"):
-            filled += 1
-        if org.get("teamRoles"):
-            filled += 1
-
-        return min(filled / 2, 1.0)
+            return False
+        
+        parts = field_path.split(".")
+        value = self.parsed_data
+        
+        for part in parts:
+            if not isinstance(value, dict):
+                return False
+            value = value.get(part)
+            if value is None:
+                return False
+        
+        # Проверяем, что значение не пустое
+        if isinstance(value, str):
+            return bool(value.strip())
+        elif isinstance(value, list):
+            return len(value) > 0
+        elif isinstance(value, dict):
+            # Для вложенных объектов проверяем наличие любых данных
+            return bool(value)
+        else:
+            return value is not None
 
 
 class SessionService:
