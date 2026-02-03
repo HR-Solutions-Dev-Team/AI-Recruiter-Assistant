@@ -80,12 +80,36 @@ class EnrichmentQuestionResponse(BaseModel):
     has_more_questions: bool = True
 
 
+class QuestionCategoryResponse(BaseModel):
+    """Категория вопросов для UI выбора."""
+
+    key: str
+    name: str
+    description: str
+    fields_count: int
+
+
+class NextQuestionRequest(BaseModel):
+    """Запрос на получение следующих вопросов."""
+
+    priority_categories: list[str] | None = None  # Категории выбранные пользователем
+
+
 class NextQuestionResponse(BaseModel):
     """Ответ с вопросами или индикатором завершения."""
 
     questions: list[EnrichmentQuestionResponse] = []
     is_complete: bool = False
     completion_percent: int
+    available_categories: list[QuestionCategoryResponse] | None = None
+
+
+class QAHistoryItem(BaseModel):
+    """Элемент истории вопрос-ответ."""
+
+    question: str
+    answer: str
+    field_path: str
 
 
 class SubmitAnswerRequest(BaseModel):
@@ -94,6 +118,7 @@ class SubmitAnswerRequest(BaseModel):
     field_path: str
     answer: str
     skip: bool = False
+    question_text: str | None = None  # Для сохранения в историю
 
 
 class SubmitAnswerResponse(BaseModel):
@@ -102,7 +127,7 @@ class SubmitAnswerResponse(BaseModel):
     success: bool
     completion_percent: int
     updated_field: str | None = None
-    # Буфер вопросов - до 3 независимых вопросов за раз
+    # Буфер вопросов - до 2 вопросов за раз
     next_questions: list[EnrichmentQuestionResponse] = []
     is_complete: bool = False
 
@@ -113,12 +138,14 @@ class BatchAnswerItem(BaseModel):
     field_path: str
     answer: str
     skip: bool = False
+    question_text: str | None = None  # Для сохранения в историю
 
 
 class BatchAnswerRequest(BaseModel):
     """Запрос на отправку пачки ответов."""
 
     answers: list[BatchAnswerItem]
+    priority_categories: list[str] | None = None  # Для генерации следующих вопросов
 
 
 class BatchAnswerResponse(BaseModel):
@@ -127,7 +154,7 @@ class BatchAnswerResponse(BaseModel):
     success: bool
     completion_percent: int
     processed_count: int
-    # Буфер вопросов - до 3 независимых вопросов за раз
+    # Буфер вопросов - до 2 вопросов за раз
     next_questions: list[EnrichmentQuestionResponse] = []
     is_complete: bool = False
 
@@ -341,16 +368,36 @@ async def upload_file(
         )
 
 
+@router.get("/enrichment/categories")
+async def get_enrichment_categories(
+    user_id: CurrentUserId,
+) -> list[QuestionCategoryResponse]:
+    """
+    Возвращает доступные категории вопросов для UI выбора приоритетов.
+    """
+    categories = enrichment_service.get_available_categories()
+    return [
+        QuestionCategoryResponse(
+            key=key,
+            name=cat["name"],
+            description=cat["description"],
+            fields_count=len(cat["fields"]),
+        )
+        for key, cat in categories.items()
+    ]
+
+
 @router.post("/session/{session_id}/enrichment/next-question", response_model=NextQuestionResponse)
 async def get_next_questions_endpoint(
     session_id: str,
     user_id: CurrentUserId,
     redis: Redis,
+    request: NextQuestionRequest | None = None,
 ) -> NextQuestionResponse:
     """
-    Получает до 3 независимых вопросов для обогащения вакансии.
+    Получает до 2 вопросов для обогащения вакансии.
 
-    Возвращает буфер вопросов для показа по одному без ожидания.
+    Поддерживает выбор приоритетных категорий и Q-A историю.
     """
     session = await session_service.get_session(session_id, user_id)
 
@@ -366,14 +413,30 @@ async def get_next_questions_endpoint(
             detail="Session has no parsed data",
         )
 
-    # Получаем список уже спрошенных полей из сессии
+    # Получаем данные из сессии
     asked_fields = session.parsed_data.get("_asked_fields") or []
+    qa_history = session.parsed_data.get("_qa_history") or []
+    priority_categories = request.priority_categories if request else None
+
+    # Получаем доступные категории для первого вызова
+    categories = enrichment_service.get_available_categories()
+    available_categories = [
+        QuestionCategoryResponse(
+            key=key,
+            name=cat["name"],
+            description=cat["description"],
+            fields_count=len(cat["fields"]),
+        )
+        for key, cat in categories.items()
+    ]
 
     try:
         questions = await enrichment_service.get_next_questions(
             vacancy_data=session.parsed_data,
             asked_fields=asked_fields,
-            max_questions=3,
+            qa_history=qa_history,
+            priority_categories=priority_categories,
+            max_questions=2,
         )
 
         completion_percent = session.get_completion_percent()
@@ -383,6 +446,7 @@ async def get_next_questions_endpoint(
                 questions=[],
                 is_complete=True,
                 completion_percent=completion_percent,
+                available_categories=available_categories,
             )
 
         return NextQuestionResponse(
@@ -401,9 +465,11 @@ async def get_next_questions_endpoint(
             ],
             is_complete=False,
             completion_percent=completion_percent,
+            available_categories=available_categories if not asked_fields else None,
         )
 
     except Exception as e:
+        logger.error(f"Failed to generate questions: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate question: {str(e)}",
@@ -420,8 +486,7 @@ async def submit_answer(
     """
     Отправляет ответ на вопрос обогащения.
 
-    Обновляет данные вакансии и сразу возвращает следующий вопрос.
-    Это оптимизация для уменьшения количества API-вызовов.
+    Сохраняет Q-A историю и возвращает следующие вопросы.
     """
     session = await session_service.get_session(session_id, user_id)
 
@@ -437,13 +502,24 @@ async def submit_answer(
             detail="Session has no parsed data",
         )
 
-    # Добавляем поле в список спрошенных (даже если пропущено)
+    # Получаем текущие данные из сессии
     asked_fields = session.parsed_data.get("_asked_fields") or []
+    qa_history = session.parsed_data.get("_qa_history") or []
+    
     if request.field_path not in asked_fields:
         asked_fields.append(request.field_path)
 
+    # Сохраняем в Q-A историю
+    if request.question_text:
+        qa_history.append({
+            "question": request.question_text,
+            "answer": request.answer if not request.skip else "[пропущено]",
+            "field_path": request.field_path,
+        })
+
     updated_data = session.parsed_data.copy()
     updated_data["_asked_fields"] = asked_fields
+    updated_data["_qa_history"] = qa_history
 
     # Если не пропуск - обрабатываем ответ
     if not request.skip:
@@ -453,8 +529,9 @@ async def submit_answer(
                 field_path=request.field_path,
                 answer=request.answer,
             )
-            # Сохраняем asked_fields
+            # Сохраняем метаданные
             updated_data["_asked_fields"] = asked_fields
+            updated_data["_qa_history"] = qa_history
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -471,7 +548,7 @@ async def submit_answer(
 
     completion_percent = session.get_completion_percent()
 
-    # Генерируем до 3 независимых вопросов параллельно (буферизация)
+    # Генерируем до 2 вопросов с учётом истории
     next_questions_response: list[EnrichmentQuestionResponse] = []
     is_complete = False
 
@@ -479,7 +556,8 @@ async def submit_answer(
         next_questions = await enrichment_service.get_next_questions(
             vacancy_data=updated_data,
             asked_fields=asked_fields,
-            max_questions=3,
+            qa_history=qa_history,
+            max_questions=2,
         )
 
         if not next_questions:
@@ -500,6 +578,8 @@ async def submit_answer(
             ]
     except Exception as e:
         logger.error(f"Failed to generate next questions: {e}")
+        # Fallback: пропускаем генерацию
+        is_complete = True
 
     return SubmitAnswerResponse(
         success=True,
@@ -520,8 +600,7 @@ async def batch_submit_answers(
     """
     Отправляет пачку ответов за один запрос.
 
-    Используется для оптимизации - ответы накапливаются локально
-    и отправляются когда буфер вопросов опустеет.
+    Сохраняет Q-A историю для контекста следующих вопросов.
     """
     session = await session_service.get_session(session_id, user_id)
 
@@ -537,8 +616,9 @@ async def batch_submit_answers(
             detail="Session has no parsed data",
         )
 
-    # Получаем текущие asked_fields
+    # Получаем текущие данные из сессии
     asked_fields = session.parsed_data.get("_asked_fields") or []
+    qa_history = session.parsed_data.get("_qa_history") or []
     updated_data = session.parsed_data.copy()
 
     processed_count = 0
@@ -548,6 +628,14 @@ async def batch_submit_answers(
         # Добавляем поле в список спрошенных
         if answer_item.field_path not in asked_fields:
             asked_fields.append(answer_item.field_path)
+
+        # Сохраняем в Q-A историю (даже пропуски для контекста)
+        if answer_item.question_text:
+            qa_history.append({
+                "question": answer_item.question_text,
+                "answer": answer_item.answer if not answer_item.skip else "[пропущено]",
+                "field_path": answer_item.field_path,
+            })
 
         # Если не пропуск - обрабатываем ответ
         if not answer_item.skip and answer_item.answer:
@@ -563,8 +651,9 @@ async def batch_submit_answers(
 
         processed_count += 1
 
-    # Сохраняем asked_fields
+    # Сохраняем метаданные
     updated_data["_asked_fields"] = asked_fields
+    updated_data["_qa_history"] = qa_history
 
     # Обновляем сессию один раз после всех ответов
     session = await session_service.update_session(
@@ -576,7 +665,7 @@ async def batch_submit_answers(
 
     completion_percent = session.get_completion_percent()
 
-    # Генерируем новые вопросы
+    # Генерируем новые вопросы с учётом истории и категорий
     next_questions_response: list[EnrichmentQuestionResponse] = []
     is_complete = False
 
@@ -584,7 +673,9 @@ async def batch_submit_answers(
         next_questions = await enrichment_service.get_next_questions(
             vacancy_data=updated_data,
             asked_fields=asked_fields,
-            max_questions=3,
+            qa_history=qa_history,
+            priority_categories=request.priority_categories,
+            max_questions=2,
         )
 
         if not next_questions:
@@ -605,6 +696,8 @@ async def batch_submit_answers(
             ]
     except Exception as e:
         logger.error(f"Failed to generate next questions: {e}")
+        # Fallback: пропускаем генерацию вопросов
+        is_complete = True
 
     return BatchAnswerResponse(
         success=True,

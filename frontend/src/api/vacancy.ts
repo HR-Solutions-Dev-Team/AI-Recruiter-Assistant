@@ -43,17 +43,25 @@ export interface EnrichmentQuestion {
   has_more_questions: boolean;
 }
 
+export interface QuestionCategory {
+  key: string;
+  name: string;
+  description: string;
+  fields_count: number;
+}
+
 export interface NextQuestionResponse {
   questions: EnrichmentQuestion[];
   is_complete: boolean;
   completion_percent: number;
+  available_categories?: QuestionCategory[];
 }
 
 export interface SubmitAnswerResponse {
   success: boolean;
   completion_percent: number;
   updated_field: string | null;
-  // Буфер: до 3 независимых вопросов за раз
+  // Буфер: до 2 вопросов за раз
   next_questions: EnrichmentQuestion[];
   is_complete: boolean;
 }
@@ -62,6 +70,7 @@ export interface BatchAnswerItem {
   field_path: string;
   answer: string;
   skip: boolean;
+  question_text?: string;  // Для сохранения в Q-A историю
 }
 
 export interface BatchAnswerResponse {
@@ -165,12 +174,22 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Получить следующий вопрос для обогащения вакансии.
+ * Получить список доступных категорий вопросов.
  */
-export async function getNextQuestion(sessionId: string): Promise<NextQuestionResponse> {
+export async function getEnrichmentCategories(): Promise<QuestionCategory[]> {
+  return apiClient.get<QuestionCategory[]>('/v1/vacancy/enrichment/categories');
+}
+
+/**
+ * Получить следующие вопросы для обогащения вакансии.
+ */
+export async function getNextQuestion(
+  sessionId: string,
+  priorityCategories?: string[]
+): Promise<NextQuestionResponse> {
   return apiClient.post<NextQuestionResponse>(
     `/v1/vacancy/session/${sessionId}/enrichment/next-question`,
-    {}
+    { priority_categories: priorityCategories }
   );
 }
 
@@ -181,11 +200,12 @@ export async function submitAnswer(
   sessionId: string,
   fieldPath: string,
   answer: string,
-  skip: boolean = false
+  skip: boolean = false,
+  questionText?: string
 ): Promise<SubmitAnswerResponse> {
   return apiClient.post<SubmitAnswerResponse>(
     `/v1/vacancy/session/${sessionId}/enrichment/answer`,
-    { field_path: fieldPath, answer, skip }
+    { field_path: fieldPath, answer, skip, question_text: questionText }
   );
 }
 
@@ -195,11 +215,12 @@ export async function submitAnswer(
  */
 export async function batchSubmitAnswers(
   sessionId: string,
-  answers: BatchAnswerItem[]
+  answers: BatchAnswerItem[],
+  priorityCategories?: string[]
 ): Promise<BatchAnswerResponse> {
   return apiClient.post<BatchAnswerResponse>(
     `/v1/vacancy/session/${sessionId}/enrichment/batch-answer`,
-    { answers }
+    { answers, priority_categories: priorityCategories }
   );
 }
 

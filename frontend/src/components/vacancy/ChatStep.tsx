@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Bot, User, SkipForward, ArrowRight, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
-import { getNextQuestion, batchSubmitAnswers, getSession, type EnrichmentQuestion, type BatchAnswerItem } from '../../api';
+import { Send, Bot, User, SkipForward, ArrowRight, CheckCircle, Loader2, AlertCircle, Settings2 } from 'lucide-react';
+import { getNextQuestion, batchSubmitAnswers, getSession, type EnrichmentQuestion, type BatchAnswerItem, type QuestionCategory } from '../../api';
 import type { VacancyInput } from '../../types/vacancy';
 
 interface ChatStepProps {
@@ -32,7 +32,7 @@ export default function ChatStep({
   const [currentQuestion, setCurrentQuestion] = useState<EnrichmentQuestion | null>(null);
   // Буфер вопросов - предзагруженные вопросы для мгновенного показа
   const [questionBuffer, setQuestionBuffer] = useState<EnrichmentQuestion[]>([]);
-  // Накопленные ответы - отправляются пачкой когда буфер опустеет
+  // Накопленные ответы с question_text для Q-A истории
   const [pendingAnswers, setPendingAnswers] = useState<BatchAnswerItem[]>([]);
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(false);
   const [customInput, setCustomInput] = useState('');
@@ -41,6 +41,13 @@ export default function ChatStep({
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   const [answeredCount, setAnsweredCount] = useState(0);
+  
+  // Категории вопросов
+  const [availableCategories, setAvailableCategories] = useState<QuestionCategory[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [showCategorySelector, setShowCategorySelector] = useState(false);
+  const [categoriesChosen, setCategoriesChosen] = useState(false);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initialLoadDone = useRef(false);
 
@@ -53,14 +60,24 @@ export default function ChatStep({
     setMessages((prev) => [...prev, { id: prev.length + 1, type, content }]);
   };
 
-  // Загрузить начальные вопросы
-  const loadInitialQuestions = useCallback(async () => {
+  // Загрузить начальные вопросы (с показом категорий при первом вызове)
+  const loadInitialQuestions = useCallback(async (categories?: string[]) => {
     setIsLoadingQuestion(true);
     setError(null);
 
     try {
-      const response = await getNextQuestion(sessionId);
+      const response = await getNextQuestion(sessionId, categories);
       setCompletionPercent(response.completion_percent);
+
+      // Сохраняем доступные категории при первом вызове
+      if (response.available_categories && response.available_categories.length > 0) {
+        setAvailableCategories(response.available_categories);
+        if (!categoriesChosen) {
+          setShowCategorySelector(true);
+          setIsLoadingQuestion(false);
+          return;
+        }
+      }
 
       if (response.is_complete || response.questions.length === 0) {
         setIsComplete(true);
@@ -80,7 +97,7 @@ export default function ChatStep({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [sessionId, setCompletionPercent]);
+  }, [sessionId, setCompletionPercent, categoriesChosen]);
 
   // Отправить накопленные ответы и получить новые вопросы
   const flushAnswersAndLoadMore = useCallback(async (answers: BatchAnswerItem[]) => {
@@ -90,7 +107,11 @@ export default function ChatStep({
     setError(null);
 
     try {
-      const response = await batchSubmitAnswers(sessionId, answers);
+      const response = await batchSubmitAnswers(
+        sessionId, 
+        answers, 
+        selectedCategories.length > 0 ? selectedCategories : undefined
+      );
       setCompletionPercent(response.completion_percent);
 
       // Уведомление о достижении порога
@@ -117,7 +138,7 @@ export default function ChatStep({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [sessionId, setCompletionPercent]);
+  }, [sessionId, setCompletionPercent, selectedCategories]);
 
   useEffect(() => {
     if (!initialLoadDone.current) {
@@ -132,16 +153,45 @@ export default function ChatStep({
     }
   }, [vacancyData.core?.jobTitle, completionPercent, loadInitialQuestions]);
 
+  // Обработчик выбора категорий
+  const handleCategoryToggle = (categoryKey: string) => {
+    setSelectedCategories(prev => 
+      prev.includes(categoryKey)
+        ? prev.filter(k => k !== categoryKey)
+        : [...prev, categoryKey]
+    );
+  };
+
+  const handleCategoriesConfirm = () => {
+    setCategoriesChosen(true);
+    setShowCategorySelector(false);
+    
+    if (selectedCategories.length > 0) {
+      const categoryNames = selectedCategories
+        .map(key => availableCategories.find(c => c.key === key)?.name)
+        .filter(Boolean)
+        .join(', ');
+      addMessage('user', `Приоритетные категории: ${categoryNames}`);
+    } else {
+      addMessage('user', 'Все категории (стандартный порядок)');
+    }
+    
+    // Загружаем вопросы с выбранными категориями
+    loadInitialQuestions(selectedCategories.length > 0 ? selectedCategories : undefined);
+  };
+
   const handleOptionSelect = async (option: string) => {
     if (!currentQuestion || isSubmitting) return;
 
     const fieldPath = currentQuestion.field_path;
+    const questionText = currentQuestion.question_text;
 
-    // Добавляем ответ в pending
+    // Добавляем ответ в pending с question_text для Q-A истории
     const newAnswer: BatchAnswerItem = {
       field_path: fieldPath,
       answer: option,
       skip: false,
+      question_text: questionText,
     };
     const newPendingAnswers = [...pendingAnswers, newAnswer];
     setPendingAnswers(newPendingAnswers);
@@ -180,12 +230,14 @@ export default function ChatStep({
     if (!currentQuestion || isSubmitting) return;
 
     const fieldPath = currentQuestion.field_path;
+    const questionText = currentQuestion.question_text;
 
     // Добавляем пропуск в pending
     const newAnswer: BatchAnswerItem = {
       field_path: fieldPath,
       answer: '',
       skip: true,
+      question_text: questionText,
     };
     const newPendingAnswers = [...pendingAnswers, newAnswer];
     setPendingAnswers(newPendingAnswers);
@@ -245,6 +297,75 @@ export default function ChatStep({
   };
 
   const isHighCompletion = completionPercent >= COMPLETION_THRESHOLD;
+
+  // Рендер селектора категорий
+  if (showCategorySelector && availableCategories.length > 0) {
+    return (
+      <div className="max-w-3xl mx-auto">
+        <div className="bg-white border border-gray-200 rounded-2xl p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center">
+              <Settings2 size={20} className="text-white" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-gray-900">Выберите приоритетные категории</h3>
+              <p className="text-sm text-gray-500">
+                Какие аспекты вакансии важнее всего уточнить?
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2 mb-6">
+            {availableCategories.map((category) => (
+              <button
+                key={category.key}
+                onClick={() => handleCategoryToggle(category.key)}
+                className={`
+                  w-full text-left px-4 py-3 rounded-xl border transition-all
+                  ${selectedCategories.includes(category.key)
+                    ? 'bg-gray-900 text-white border-gray-900'
+                    : 'bg-white text-gray-900 border-gray-200 hover:border-gray-300'
+                  }
+                `}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium">{category.name}</span>
+                    <p className={`text-xs mt-0.5 ${
+                      selectedCategories.includes(category.key) ? 'text-gray-300' : 'text-gray-500'
+                    }`}>
+                      {category.description}
+                    </p>
+                  </div>
+                  <span className={`text-xs ${
+                    selectedCategories.includes(category.key) ? 'text-gray-300' : 'text-gray-400'
+                  }`}>
+                    {category.fields_count} вопросов
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={handleCategoriesConfirm}
+              className="flex-1 px-4 py-3 bg-gray-900 text-white rounded-xl font-medium
+                         hover:bg-gray-800 transition-colors"
+            >
+              {selectedCategories.length > 0 
+                ? `Начать (${selectedCategories.length} категорий)`
+                : 'Начать (все категории)'}
+            </button>
+          </div>
+          
+          <p className="text-xs text-gray-400 text-center mt-3">
+            Вы можете выбрать несколько категорий или оставить все для полного обогащения
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto">

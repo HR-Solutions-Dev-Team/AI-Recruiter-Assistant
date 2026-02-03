@@ -28,8 +28,8 @@ class Settings(BaseSettings):
 
     # OpenRouter API
     openrouter_api_key: str = ""
-    openrouter_model: str = "anthropic/claude-3.5-haiku"
-    openrouter_model_fast: str = "google/gemini-2.0-flash-001"  # For resume parsing
+    openrouter_model: str = "google/gemini-2.5-flash"
+    openrouter_model_fast: str = "google/gemini-2.5-flash"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # OpenAI API (for embeddings)

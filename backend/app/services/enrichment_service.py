@@ -1,6 +1,7 @@
 """
 Сервис для обогащения вакансий через LLM.
 Генерирует контекстные вопросы по незаполненным полям.
+Оптимизировано для google/gemini-2.5-flash.
 """
 
 import json
@@ -32,54 +33,20 @@ class EnrichmentQuestion(BaseModel):
     depends_on: str | None = None
 
 
-# Группы зависимых полей (нельзя спрашивать вместе)
-DEPENDENCY_GROUPS = [
-    # Сфера деятельности - иерархия
-    {"company.activitySphere.sphere", "company.activitySphere.subSphere"},
-    # Industry - иерархия
-    {"core.industry"},
-    # Hiring Context - связанные поля
-    {"hiringContext.businessProblem", "hiringContext.expectedImpact"},
-    # Success Criteria - последовательность
-    {"successCriteria.onboardingMilestones", "successCriteria.shortTermKPIs"},
-    # Differentiators - связанные поля
-    {"differentiators.industryExpertise", "differentiators.scaleExperience"},
-]
-
-
-def _get_dependency_group(field_path: str) -> set[str] | None:
-    """Возвращает группу зависимостей для поля."""
-    for group in DEPENDENCY_GROUPS:
-        if field_path in group:
-            return group
-    return None
-
-
-def _are_fields_independent(field1: str, field2: str) -> bool:
-    """Проверяет, что два поля независимы (можно спрашивать вместе)."""
-    group1 = _get_dependency_group(field1)
-    group2 = _get_dependency_group(field2)
-
-    # Если оба поля в одной группе зависимостей - они зависимы
-    if group1 and group2 and group1 == group2:
-        return False
-
-    # Проверяем прямую зависимость через depends_on
-    for field_info in FIELD_PRIORITIES:
-        if field_info["path"] == field1 and field_info.get("depends_on") == field2:
-            return False
-        if field_info["path"] == field2 and field_info.get("depends_on") == field1:
-            return False
-
-    return True
-
-
 class EnrichmentAnswerResult(BaseModel):
     """Результат обработки ответа."""
 
     field_path: str
     updated_value: Any
     new_completion_percent: int
+
+
+class QAHistoryItem(BaseModel):
+    """Элемент истории вопрос-ответ."""
+    
+    question: str
+    answer: str
+    field_path: str
 
 
 def _safe_get(d: dict, *keys: str) -> Any:
@@ -93,318 +60,262 @@ def _safe_get(d: dict, *keys: str) -> Any:
 
 
 # ============================================================================
-# ПРИОРИТЕТЫ ПОЛЕЙ ДЛЯ EXECUTIVE SEARCH
+# КАТЕГОРИИ ВОПРОСОВ (для выбора пользователем)
 # ============================================================================
-# Переориентировано с массового подбора на headhunting редких специалистов.
-# Фокус: бизнес-контекст → KPI → дифференциаторы → отсечки → детали.
-# Skills понижены в приоритете (для exec search они вторичны).
+
+QUESTION_CATEGORIES = {
+    "business_context": {
+        "name": "Бизнес-контекст",
+        "description": "Почему открыта вакансия, какую проблему решаем",
+        "fields": [
+            "hiringContext.businessProblem",
+            "hiringContext.triggerEvent", 
+            "hiringContext.expectedImpact",
+        ],
+    },
+    "success_criteria": {
+        "name": "Критерии успеха",
+        "description": "KPI, milestones, ожидания от кандидата",
+        "fields": [
+            "successCriteria.onboardingMilestones",
+            "successCriteria.shortTermKPIs",
+        ],
+    },
+    "ideal_candidate": {
+        "name": "Идеальный кандидат",
+        "description": "Опыт, достижения, бэкграунд",
+        "fields": [
+            "differentiators.industryExpertise",
+            "differentiators.scaleExperience",
+            "differentiators.achievementMarkers",
+            "differentiators.companyBackground",
+        ],
+    },
+    "requirements": {
+        "name": "Требования",
+        "description": "Обязательные навыки и опыт",
+        "fields": [
+            "dealbreakers.absoluteRequirements",
+            "dealbreakers.experienceMinimums",
+            "dealbreakers.nonNegotiables",
+            "dealbreakers.redFlags",
+            "requirements.skills",
+        ],
+    },
+    "responsibilities": {
+        "name": "Обязанности",
+        "description": "Зоны ответственности и задачи",
+        "fields": [
+            "responsibilities.criticalTasks",
+            "responsibilities.zones",
+        ],
+    },
+    "basics": {
+        "name": "Базовая информация",
+        "description": "Уровень, отрасль, условия",
+        "fields": [
+            "core.careerLevel.code",
+            "core.industry",
+            "workConditions.salary",
+            "workConditions.location",
+            "orgStructure.reportsTo",
+        ],
+    },
+}
+
+
+# ============================================================================
+# ПРИОРИТЕТЫ ПОЛЕЙ
 # ============================================================================
 
 FIELD_PRIORITIES: list[dict[str, Any]] = [
-    # =========================================================================
-    # PRIORITY 1: КРИТИЧНО — Бизнес-контекст (без этого не начинаем поиск)
-    # =========================================================================
+    # Priority 1: Бизнес-контекст
     {
         "path": "hiringContext.businessProblem",
         "priority": 1,
-        "description": "Какую бизнес-проблему должен решить этот человек? Конкретно и измеримо.",
+        "label": "Бизнес-проблема",
         "check": lambda d: bool(_safe_get(d, "hiringContext", "businessProblem")),
-        "question_hint": "executive_context",
     },
     {
         "path": "hiringContext.triggerEvent",
         "priority": 1,
-        "description": "Что послужило причиной открытия вакансии? (рост, замена, новое направление, кризис)",
+        "label": "Причина открытия",
         "check": lambda d: bool(_safe_get(d, "hiringContext", "triggerEvent", "type")),
-        "question_hint": "executive_context",
     },
     {
         "path": "successCriteria.onboardingMilestones",
         "priority": 1,
-        "description": "Конкретные milestones первых 90 дней. Что человек ДОЛЖЕН сделать?",
+        "label": "Milestones 90 дней",
         "check": lambda d: len(_safe_get(d, "successCriteria", "onboardingMilestones") or []) >= 2,
-        "question_hint": "executive_kpi",
     },
     {
         "path": "differentiators.industryExpertise",
         "priority": 1,
-        "description": "Какая отраслевая экспертиза критична? Почему именно она важна?",
+        "label": "Отраслевая экспертиза",
         "check": lambda d: bool(_safe_get(d, "differentiators", "industryExpertise", "industries")),
-        "question_hint": "executive_differentiator",
     },
-
-    # =========================================================================
-    # PRIORITY 2: ВЫСОКИЙ — Формирование профиля идеального кандидата
-    # =========================================================================
+    # Priority 2: Профиль кандидата
     {
         "path": "dealbreakers.absoluteRequirements",
         "priority": 2,
-        "description": "Абсолютные требования без исключений (сертификации, допуски, гражданство)",
+        "label": "Абсолютные требования",
         "check": lambda d: bool(_safe_get(d, "dealbreakers", "absoluteRequirements")),
-        "question_hint": "executive_dealbreaker",
     },
     {
         "path": "responsibilities.criticalTasks",
         "priority": 2,
-        "description": "Критические задачи первых 90 дней с индикаторами успеха",
+        "label": "Критические задачи",
         "check": lambda d: len(_safe_get(d, "responsibilities", "criticalTasks") or []) >= 2,
-        "question_hint": "executive_tasks",
     },
     {
         "path": "differentiators.scaleExperience",
         "priority": 2,
-        "description": "С каким масштабом должен был работать? (команда, бюджет, объёмы данных)",
+        "label": "Масштаб опыта",
         "check": lambda d: bool(_safe_get(d, "differentiators", "scaleExperience")),
-        "question_hint": "executive_scale",
     },
     {
         "path": "successCriteria.shortTermKPIs",
         "priority": 2,
-        "description": "Измеримые KPI на 6 месяцев (текущее значение → целевое)",
+        "label": "KPI на 6 месяцев",
         "check": lambda d: len(_safe_get(d, "successCriteria", "shortTermKPIs") or []) >= 2,
         "depends_on": "successCriteria.onboardingMilestones",
-        "question_hint": "executive_kpi",
     },
     {
         "path": "differentiators.achievementMarkers",
         "priority": 2,
-        "description": "Конкретные достижения, которые хотим видеть в опыте кандидата",
+        "label": "Достижения кандидата",
         "check": lambda d: len(_safe_get(d, "differentiators", "achievementMarkers") or []) >= 2,
-        "question_hint": "executive_differentiator",
     },
     {
         "path": "hiringContext.expectedImpact",
         "priority": 2,
-        "description": "Какой конкретный результат ожидается от найма этого человека?",
+        "label": "Ожидаемый результат",
         "check": lambda d: bool(_safe_get(d, "hiringContext", "expectedImpact")),
         "depends_on": "hiringContext.businessProblem",
-        "question_hint": "executive_context",
     },
     {
         "path": "dealbreakers.experienceMinimums",
         "priority": 2,
-        "description": "Минимальные пороги опыта (общий, в домене, в руководстве)",
+        "label": "Минимальный опыт",
         "check": lambda d: bool(_safe_get(d, "dealbreakers", "experienceMinimums", "totalYears")),
-        "question_hint": "executive_dealbreaker",
     },
-
-    # =========================================================================
-    # PRIORITY 3: СТАНДАРТНЫЙ — Детализация профиля
-    # =========================================================================
+    # Priority 3: Детализация
     {
         "path": "core.careerLevel.code",
         "priority": 3,
-        "description": "Уровень позиции в карьерной иерархии",
+        "label": "Уровень позиции",
         "check": lambda d: bool(_safe_get(d, "core", "careerLevel", "code")),
     },
     {
         "path": "dealbreakers.nonNegotiables",
         "priority": 3,
-        "description": "Требования, которые не обсуждаются и не компенсируются другими качествами",
+        "label": "Не обсуждаемые требования",
         "check": lambda d: bool(_safe_get(d, "dealbreakers", "nonNegotiables")),
-        "question_hint": "executive_dealbreaker",
-    },
-    {
-        "path": "requirements.experience.scaleIndicators",
-        "priority": 3,
-        "description": "Индикаторы масштаба опыта (команда, бюджет, проекты)",
-        "check": lambda d: bool(_safe_get(d, "requirements", "experience", "scaleIndicators")),
     },
     {
         "path": "responsibilities.zones",
         "priority": 3,
-        "description": "Зоны ответственности (минимум 3 для exec search)",
+        "label": "Зоны ответственности",
         "check": lambda d: len(_safe_get(d, "responsibilities", "zones") or []) >= 3,
     },
     {
         "path": "requirements.skills",
-        "priority": 3,  # ПОНИЖЕН с 1 до 3 для executive search
-        "description": "Ключевые навыки (для exec search вторичны — следуют из опыта)",
+        "priority": 3,
+        "label": "Ключевые навыки",
         "check": lambda d: len(_safe_get(d, "requirements", "skills") or []) >= 3,
     },
     {
         "path": "differentiators.companyBackground",
         "priority": 3,
-        "description": "Предпочтительный бэкграунд по типам компаний (FAANG, стартапы, enterprise)",
+        "label": "Предпочтительный бэкграунд",
         "check": lambda d: bool(_safe_get(d, "differentiators", "companyBackground", "preferred")),
-        "question_hint": "executive_differentiator",
     },
     {
         "path": "dealbreakers.redFlags",
         "priority": 3,
-        "description": "Что точно НЕ подходит (антипаттерны, warning signs)",
+        "label": "Red flags",
         "check": lambda d: bool(_safe_get(d, "dealbreakers", "redFlags")),
-        "question_hint": "executive_dealbreaker",
     },
-
-    # =========================================================================
-    # PRIORITY 4: ПОДДЕРЖИВАЮЩИЙ — Дополнительная информация
-    # =========================================================================
+    # Priority 4: Дополнительно
     {
         "path": "core.industry",
         "priority": 4,
-        "description": "Отрасль вакансии",
+        "label": "Отрасль",
         "check": lambda d: bool(_safe_get(d, "core", "industry", "name")),
     },
     {
         "path": "workConditions.salary",
         "priority": 4,
-        "description": "Зарплатная вилка (для exec search часто обсуждается индивидуально)",
+        "label": "Зарплата",
         "check": lambda d: bool(_safe_get(d, "workConditions", "salary")),
     },
     {
         "path": "workConditions.location",
         "priority": 4,
-        "description": "Локация и формат работы",
+        "label": "Локация",
         "check": lambda d: bool(_safe_get(d, "workConditions", "location")),
-    },
-    {
-        "path": "company.activitySphere.sphere",
-        "priority": 4,
-        "description": "Основная сфера деятельности компании",
-        "check": lambda d: bool(_safe_get(d, "company", "activitySphere", "sphere")),
-    },
-    {
-        "path": "requirements.experience",
-        "priority": 4,
-        "description": "Общие требования к опыту работы",
-        "check": lambda d: bool(_safe_get(d, "requirements", "experience", "yearsMin")),
     },
     {
         "path": "orgStructure.reportsTo",
         "priority": 4,
-        "description": "Кому подчиняется позиция",
+        "label": "Подчинение",
         "check": lambda d: bool(_safe_get(d, "orgStructure", "reportsTo")),
-    },
-    {
-        "path": "core.synonyms",
-        "priority": 4,
-        "description": "Альтернативные названия позиции",
-        "check": lambda d: bool(_safe_get(d, "core", "synonyms")),
     },
     {
         "path": "requirements.languages",
         "priority": 4,
-        "description": "Требования к языкам",
+        "label": "Языки",
         "check": lambda d: bool(_safe_get(d, "requirements", "languages")),
     },
 ]
 
 
 # ============================================================================
-# ПРОМПТЫ ДЛЯ EXECUTIVE SEARCH
-# ============================================================================
-# Адаптированы для глубокого понимания бизнес-контекста и формирования
-# "узкого горлышка" для поиска редких специалистов.
+# ОПТИМИЗИРОВАННЫЙ ПРОМПТ (короткий и точный)
 # ============================================================================
 
-QUESTION_GENERATION_PROMPT = """Ты — эксперт по Executive Search, помогаешь рекрутеру сформировать профиль РЕДКОГО СПЕЦИАЛИСТА.
+QUESTION_GENERATION_PROMPT = """Ты — HR-эксперт по Executive Search. Помоги рекрутеру собрать информацию для поиска РЕДКОГО специалиста.
 
-Контекст: Мы ищем не просто подходящего кандидата, а уникального специалиста.
-Таких людей на рынке единицы (5-10 человек). Твоя задача — помочь рекрутеру
-правильно сформулировать критерии, чтобы найти именно того, кто нужен.
+ВАКАНСИЯ: {job_title}
+{vacancy_summary}
 
-Текущие данные вакансии:
-{vacancy_data}
+ИСТОРИЯ ОТВЕТОВ:
+{qa_history}
 
-Незаполненное поле: {field_path}
-Описание поля: {field_description}
+ЗАДАЧА: Сгенерируй {num_questions} уточняющих вопроса для полей: {field_paths}
 
-ВАЖНО — стиль вопроса зависит от типа поля:
+ПРАВИЛА:
+- Вопросы должны быть конкретными и помогать отличить идеального кандидата от среднего
+- Опции — это примеры ответов, не ограничивай ими рекрутера
+- Учитывай уже полученные ответы, не повторяй вопросы
+- Отвечай ТОЛЬКО JSON без markdown
 
-Для hiringContext (бизнес-контекст):
-- Спрашивай о ПРИЧИНАХ и ПРОБЛЕМАХ, а не о формальностях
-- "Что случилось в бизнесе, почему понадобился этот человек?"
-- "Какую конкретную проблему он должен решить?"
-- "Что произойдёт, если не найдём его в ближайшие 2 месяца?"
-
-Для successCriteria (KPI):
-- Спрашивай об ИЗМЕРИМЫХ результатах
-- "Что конкретно должен показать через 90 дней?"
-- "Какую метрику должен улучшить и насколько?"
-- "По какому критерию поймём, что наняли правильного человека?"
-
-Для differentiators (дифференциаторы):
-- Спрашивай о том, что ОТЛИЧАЕТ идеального от просто хорошего
-- "С каким масштабом должен был работать?"
-- "Какие конкретные достижения хотите видеть в резюме?"
-- "Из каких компаний предпочтительнее кандидат?"
-
-Для dealbreakers (отсечки):
-- Спрашивай о КРАСНЫХ ФЛАГАХ и МИНИМАЛЬНЫХ ПОРОГАХ
-- "Без какого опыта точно не рассматриваем?"
-- "Какой бэкграунд точно не подходит?"
-- "Есть ли ограничения по предыдущим работодателям?"
-
-Сгенерируй ОДИН глубокий вопрос и 3-4 релевантных варианта ответа.
-Варианты должны быть:
-1. КОНКРЕТНЫМИ — не "опыт в IT", а "опыт в high-load системах с 1M+ RPS"
-2. ДИФФЕРЕНЦИРУЮЩИМИ — помогают отличить идеального от среднего
-3. Релевантными контексту (учитывай jobTitle: {job_title}, если есть)
-4. На русском языке
-
-Формат ответа - ТОЛЬКО валидный JSON без markdown:
-{{
-  "question": "текст глубокого вопроса",
-  "options": [
-    {{"value": "конкретное значение", "description": "почему это важно"}}
-  ]
-}}"""
+ФОРМАТ:
+{{"questions": [
+  {{"field_path": "...", "question": "...", "options": [{{"value": "...", "description": "..."}}]}}
+]}}"""
 
 
-ANSWER_PROCESSING_PROMPT = """Преобразуй ответ пользователя в структурированные данные для Executive Search вакансии.
+ANSWER_PROCESSING_PROMPT = """Преобразуй ответ рекрутера в структурированные данные.
 
 Поле: {field_path}
-Ответ пользователя: {answer}
-Текущие данные вакансии: {vacancy_data}
+Ответ: {answer}
 
-Верни ТОЛЬКО валидный JSON с обновлённым значением для этого поля.
+Верни JSON: {{"value": ...}}
 
-ПРАВИЛА ПРЕОБРАЗОВАНИЯ:
-
-1. Для простых строковых полей:
-   {{"value": "строка"}}
-
-2. Для hiringContext.triggerEvent:
-   {{"value": {{"type": "growth|replacement|new_direction|crisis|transformation|m_and_a|restructuring", "description": "детали"}}}}
-
-3. Для successCriteria.onboardingMilestones (массив milestones):
-   {{"value": [{{"milestone": "описание", "timeframe": "30_days|60_days|90_days", "measureOfSuccess": "критерий успеха"}}]}}
-
-4. Для successCriteria.shortTermKPIs (массив KPI):
-   {{"value": [{{"metric": "название метрики", "currentValue": "текущее", "targetValue": "целевое"}}]}}
-
-5. Для differentiators.industryExpertise:
-   {{"value": {{"industries": ["индустрия1", "индустрия2"], "whyMatters": "почему важно"}}}}
-
-6. Для differentiators.scaleExperience:
-   {{"value": {{"teamSize": {{"min": число, "description": "пояснение"}}, "dataVolume": "объём", "usersScale": "масштаб"}}}}
-
-7. Для differentiators.achievementMarkers (массив достижений):
-   {{"value": [{{"achievement": "описание достижения", "importance": "must_have|strong_plus|nice_to_have"}}]}}
-
-8. Для dealbreakers.absoluteRequirements (массив требований):
-   {{"value": [{{"requirement": "требование", "reason": "причина"}}]}}
-
-9. Для dealbreakers.experienceMinimums:
-   {{"value": {{"totalYears": число, "domainYears": число, "leadershipYears": число}}}}
-
-10. Для responsibilities.criticalTasks (массив задач):
-    {{"value": [{{"task": "описание задачи", "deadline": "30|60|90 дней", "successIndicator": "индикатор успеха"}}]}}
-
-11. Для массивов строк (zones, redFlags, nonNegotiables):
-    {{"value": ["элемент1", "элемент2", "элемент3"]}}
-
-12. Для core.careerLevel.code:
-    {{"value": "intern|junior|middle|senior|lead|head|director|c-level"}}
-
-Пример для differentiators.industryExpertise:
-{{"value": {{"industries": ["FinTech", "Banking"], "whyMatters": "Нужно понимание PCI DSS и работа с транзакционными данными"}}}}
-
-Пример для successCriteria.onboardingMilestones:
-{{"value": [{{"milestone": "Провести аудит текущей инфраструктуры", "timeframe": "30_days", "measureOfSuccess": "Документ с findings и roadmap"}}]}}
-
-JSON:"""
+Типы данных:
+- triggerEvent: {{"type": "growth|replacement|new_direction|crisis", "description": "..."}}
+- onboardingMilestones: [{{"milestone": "...", "timeframe": "30_days|60_days|90_days", "measureOfSuccess": "..."}}]
+- shortTermKPIs: [{{"metric": "...", "currentValue": "...", "targetValue": "..."}}]
+- industryExpertise: {{"industries": ["..."], "whyMatters": "..."}}
+- scaleExperience: {{"teamSize": {{"min": N}}, "dataVolume": "...", "usersScale": "..."}}
+- achievementMarkers: [{{"achievement": "...", "importance": "must_have|strong_plus|nice_to_have"}}]
+- absoluteRequirements: [{{"requirement": "...", "reason": "..."}}]
+- experienceMinimums: {{"totalYears": N, "domainYears": N, "leadershipYears": N}}
+- criticalTasks: [{{"task": "...", "deadline": "30|60|90 дней", "successIndicator": "..."}}]
+- zones/redFlags/nonNegotiables: ["..."]
+- careerLevel.code: "intern|junior|middle|senior|lead|head|director|c-level"
+- Простые строки: {{"value": "..."}}"""
 
 
 class EnrichmentService:
@@ -415,160 +326,234 @@ class EnrichmentService:
         self.model = settings.openrouter_model
         self.base_url = settings.openrouter_base_url
 
+    def get_available_categories(self) -> dict[str, dict]:
+        """Возвращает доступные категории вопросов для UI."""
+        return QUESTION_CATEGORIES
+
+    async def get_next_questions(
+        self,
+        vacancy_data: dict[str, Any],
+        asked_fields: list[str] | None = None,
+        qa_history: list[dict[str, str]] | None = None,
+        priority_categories: list[str] | None = None,
+        max_questions: int = 2,
+    ) -> list[EnrichmentQuestion]:
+        """
+        Генерирует до max_questions вопросов за один LLM вызов.
+        
+        Args:
+            vacancy_data: Текущие данные вакансии
+            asked_fields: Поля, по которым уже задавали вопросы
+            qa_history: История вопрос-ответ для контекста
+            priority_categories: Категории вопросов выбранные пользователем
+            max_questions: Количество вопросов (по умолчанию 2)
+        
+        Returns:
+            Список вопросов
+        """
+        asked_fields = asked_fields or []
+        qa_history = qa_history or []
+        
+        # Находим незаполненные поля
+        candidate_fields = self._get_candidate_fields(
+            vacancy_data, asked_fields, priority_categories
+        )
+        
+        if not candidate_fields:
+            return []
+        
+        # Берём до max_questions полей
+        fields_to_ask = candidate_fields[:max_questions]
+        
+        try:
+            questions = await self._generate_questions_batch(
+                vacancy_data=vacancy_data,
+                field_paths=[f["path"] for f in fields_to_ask],
+                qa_history=qa_history,
+            )
+            return questions
+        except Exception as e:
+            logger.error(f"Failed to generate questions: {e}")
+            # Fallback: пропускаем и пробуем следующие поля
+            return []
+
+    def _get_candidate_fields(
+        self,
+        vacancy_data: dict[str, Any],
+        asked_fields: list[str],
+        priority_categories: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Возвращает список незаполненных полей для вопросов."""
+        candidates = []
+        
+        # Если пользователь выбрал категории — фильтруем
+        allowed_fields = None
+        if priority_categories:
+            allowed_fields = set()
+            for cat_key in priority_categories:
+                if cat_key in QUESTION_CATEGORIES:
+                    allowed_fields.update(QUESTION_CATEGORIES[cat_key]["fields"])
+        
+        for field_info in FIELD_PRIORITIES:
+            field_path = field_info["path"]
+            
+            # Фильтр по категориям
+            if allowed_fields and field_path not in allowed_fields:
+                continue
+            
+            # Пропускаем уже спрошенные
+            if field_path in asked_fields:
+                continue
+            
+            # Проверяем заполненность
+            if field_info["check"](vacancy_data):
+                continue
+            
+            # Проверяем зависимости
+            depends_on = field_info.get("depends_on")
+            if depends_on:
+                dep_field = next(
+                    (f for f in FIELD_PRIORITIES if f["path"] == depends_on), None
+                )
+                if dep_field and not dep_field["check"](vacancy_data):
+                    continue
+            
+            candidates.append(field_info)
+        
+        return candidates
+
+    async def _generate_questions_batch(
+        self,
+        vacancy_data: dict[str, Any],
+        field_paths: list[str],
+        qa_history: list[dict[str, str]],
+    ) -> list[EnrichmentQuestion]:
+        """Генерирует несколько вопросов за один LLM вызов."""
+        
+        job_title = _safe_get(vacancy_data, "core", "jobTitle") or "Вакансия"
+        
+        # Формируем краткое саммари вакансии
+        vacancy_summary = self._build_vacancy_summary(vacancy_data)
+        
+        # Формируем историю Q-A
+        qa_history_str = self._format_qa_history(qa_history)
+        
+        # Получаем labels полей
+        field_labels = []
+        for fp in field_paths:
+            field_info = next((f for f in FIELD_PRIORITIES if f["path"] == fp), None)
+            if field_info:
+                field_labels.append(f"{fp} ({field_info['label']})")
+            else:
+                field_labels.append(fp)
+        
+        prompt = QUESTION_GENERATION_PROMPT.format(
+            job_title=job_title,
+            vacancy_summary=vacancy_summary,
+            qa_history=qa_history_str or "Пока нет ответов",
+            num_questions=len(field_paths),
+            field_paths=", ".join(field_labels),
+        )
+        
+        response = await self._call_llm(prompt)
+        if not response:
+            return []
+        
+        try:
+            data = json.loads(response)
+            questions = []
+            
+            for q_data in data.get("questions", []):
+                field_path = q_data.get("field_path", "")
+                if field_path not in field_paths:
+                    # Если LLM вернул другое поле — игнорируем
+                    continue
+                
+                options = [
+                    EnrichmentOption(
+                        value=opt.get("value", ""),
+                        description=opt.get("description"),
+                    )
+                    for opt in q_data.get("options", [])
+                ]
+                
+                questions.append(EnrichmentQuestion(
+                    field_path=field_path,
+                    question_text=q_data.get("question", f"Укажите {field_path}"),
+                    options=options,
+                    allow_custom=True,
+                ))
+            
+            return questions
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response: {e}")
+            return []
+
+    def _build_vacancy_summary(self, vacancy_data: dict[str, Any]) -> str:
+        """Строит краткое саммари заполненных полей вакансии."""
+        parts = []
+        
+        # Core info
+        career_level = _safe_get(vacancy_data, "core", "careerLevel", "code")
+        if career_level:
+            parts.append(f"Уровень: {career_level}")
+        
+        industry = _safe_get(vacancy_data, "core", "industry", "name")
+        if industry:
+            parts.append(f"Отрасль: {industry}")
+        
+        # Company
+        company_name = _safe_get(vacancy_data, "company", "name")
+        if company_name:
+            parts.append(f"Компания: {company_name}")
+        
+        company_type = _safe_get(vacancy_data, "company", "type")
+        if company_type:
+            parts.append(f"Тип: {company_type}")
+        
+        # Business problem
+        problem = _safe_get(vacancy_data, "hiringContext", "businessProblem")
+        if problem:
+            parts.append(f"Проблема: {problem[:100]}")
+        
+        # Skills count
+        skills = _safe_get(vacancy_data, "requirements", "skills") or []
+        if skills:
+            parts.append(f"Навыков указано: {len(skills)}")
+        
+        if not parts:
+            return "Данные пока минимальны"
+        
+        return "\n".join(parts)
+
+    def _format_qa_history(self, qa_history: list[dict[str, str]]) -> str:
+        """Форматирует историю Q-A для промпта."""
+        if not qa_history:
+            return ""
+        
+        lines = []
+        for item in qa_history[-10:]:  # Последние 10 ответов
+            q = item.get("question", "")[:80]
+            a = item.get("answer", "")[:100]
+            lines.append(f"Q: {q}\nA: {a}")
+        
+        return "\n".join(lines)
+
     async def get_next_question(
         self,
         vacancy_data: dict[str, Any],
         asked_fields: list[str] | None = None,
     ) -> EnrichmentQuestion | None:
         """
-        Определяет следующее незаполненное поле и генерирует вопрос.
-
-        Args:
-            vacancy_data: Текущие данные вакансии
-            asked_fields: Поля, по которым уже задавали вопросы (включая пропущенные)
-
-        Returns:
-            EnrichmentQuestion или None если все поля заполнены
+        Legacy метод для совместимости. Возвращает один вопрос.
         """
-        asked_fields = asked_fields or []
-
-        # Находим первое незаполненное поле по приоритету
-        for field_info in FIELD_PRIORITIES:
-            field_path = field_info["path"]
-
-            # Пропускаем уже спрошенные поля
-            if field_path in asked_fields:
-                continue
-
-            # Проверяем заполненность
-            if field_info["check"](vacancy_data):
-                continue
-
-            # Проверяем зависимости
-            depends_on = field_info.get("depends_on")
-            if depends_on:
-                # Находим зависимое поле и проверяем его заполненность
-                dep_field = next(
-                    (f for f in FIELD_PRIORITIES if f["path"] == depends_on), None
-                )
-                if dep_field and not dep_field["check"](vacancy_data):
-                    continue
-
-            # Генерируем вопрос через LLM
-            try:
-                question = await self._generate_question(
-                    vacancy_data=vacancy_data,
-                    field_path=field_path,
-                    field_description=field_info["description"],
-                )
-                if question:
-                    question.depends_on = depends_on
-                    return question
-            except Exception as e:
-                logger.error(f"Failed to generate question for {field_path}: {e}")
-                continue
-
-        return None
-
-    async def get_next_questions(
-        self,
-        vacancy_data: dict[str, Any],
-        asked_fields: list[str] | None = None,
-        max_questions: int = 3,
-    ) -> list[EnrichmentQuestion]:
-        """
-        Генерирует до max_questions независимых вопросов за один вызов.
-
-        Вопросы выбираются так, чтобы они не были зависимы друг от друга
-        (например, нельзя спрашивать sphere и subSphere одновременно).
-
-        Args:
-            vacancy_data: Текущие данные вакансии
-            asked_fields: Поля, по которым уже задавали вопросы
-            max_questions: Максимальное количество вопросов (до 3)
-
-        Returns:
-            Список независимых вопросов (может быть пустым)
-        """
-        asked_fields = asked_fields or []
-        questions: list[EnrichmentQuestion] = []
-        selected_fields: list[str] = []
-
-        # Собираем кандидатов на вопросы
-        candidates: list[dict[str, Any]] = []
-
-        for field_info in FIELD_PRIORITIES:
-            field_path = field_info["path"]
-
-            # Пропускаем уже спрошенные поля
-            if field_path in asked_fields:
-                continue
-
-            # Проверяем заполненность
-            if field_info["check"](vacancy_data):
-                continue
-
-            # Проверяем зависимости от других полей
-            depends_on = field_info.get("depends_on")
-            if depends_on:
-                dep_field = next(
-                    (f for f in FIELD_PRIORITIES if f["path"] == depends_on), None
-                )
-                if dep_field and not dep_field["check"](vacancy_data):
-                    continue
-
-            candidates.append(field_info)
-
-        # Выбираем независимые поля
-        for candidate in candidates:
-            if len(selected_fields) >= max_questions:
-                break
-
-            field_path = candidate["path"]
-
-            # Проверяем независимость от уже выбранных полей
-            is_independent = all(
-                _are_fields_independent(field_path, selected)
-                for selected in selected_fields
-            )
-
-            if is_independent:
-                selected_fields.append(field_path)
-
-        # Генерируем вопросы параллельно через asyncio
-        import asyncio
-
-        async def generate_for_field(field_path: str) -> EnrichmentQuestion | None:
-            field_info = next(
-                (f for f in FIELD_PRIORITIES if f["path"] == field_path), None
-            )
-            if not field_info:
-                return None
-            try:
-                question = await self._generate_question(
-                    vacancy_data=vacancy_data,
-                    field_path=field_path,
-                    field_description=field_info["description"],
-                )
-                if question:
-                    question.depends_on = field_info.get("depends_on")
-                return question
-            except Exception as e:
-                logger.error(f"Failed to generate question for {field_path}: {e}")
-                return None
-
-        # Запускаем генерацию параллельно
-        results = await asyncio.gather(
-            *[generate_for_field(fp) for fp in selected_fields],
-            return_exceptions=True,
+        questions = await self.get_next_questions(
+            vacancy_data=vacancy_data,
+            asked_fields=asked_fields,
+            max_questions=1,
         )
-
-        # Собираем успешные результаты
-        for result in results:
-            if isinstance(result, EnrichmentQuestion):
-                questions.append(result)
-
-        return questions
+        return questions[0] if questions else None
 
     async def process_answer(
         self,
@@ -578,14 +563,6 @@ class EnrichmentService:
     ) -> dict[str, Any]:
         """
         Обрабатывает ответ пользователя и обновляет данные вакансии.
-
-        Args:
-            vacancy_data: Текущие данные вакансии
-            field_path: Путь к полю
-            answer: Ответ пользователя
-
-        Returns:
-            Обновлённые данные вакансии
         """
         try:
             processed_value = await self._process_answer_with_llm(
@@ -593,65 +570,23 @@ class EnrichmentService:
                 field_path=field_path,
                 answer=answer,
             )
-
-            # Обновляем данные вакансии
+            
             updated_data = self._update_vacancy_data(
                 vacancy_data=vacancy_data,
                 field_path=field_path,
                 value=processed_value,
             )
-
+            
             return updated_data
-
+            
         except Exception as e:
             logger.error(f"Failed to process answer for {field_path}: {e}")
-            # В случае ошибки пробуем простое присвоение
+            # Fallback: простое присвоение
             return self._update_vacancy_data(
                 vacancy_data=vacancy_data,
                 field_path=field_path,
                 value=answer,
             )
-
-    async def _generate_question(
-        self,
-        vacancy_data: dict[str, Any],
-        field_path: str,
-        field_description: str,
-    ) -> EnrichmentQuestion | None:
-        """Генерирует вопрос через LLM для Executive Search."""
-        # Извлекаем job_title для контекста
-        job_title = _safe_get(vacancy_data, "core", "jobTitle") or "не указано"
-
-        prompt = QUESTION_GENERATION_PROMPT.format(
-            vacancy_data=json.dumps(vacancy_data, ensure_ascii=False, indent=2),
-            field_path=field_path,
-            field_description=field_description,
-            job_title=job_title,
-        )
-
-        response = await self._call_llm(prompt)
-        if not response:
-            return None
-
-        try:
-            data = json.loads(response)
-            options = [
-                EnrichmentOption(
-                    value=opt.get("value", ""),
-                    description=opt.get("description"),
-                )
-                for opt in data.get("options", [])
-            ]
-
-            return EnrichmentQuestion(
-                field_path=field_path,
-                question_text=data.get("question", f"Укажите значение для {field_path}"),
-                options=options,
-                allow_custom=True,
-            )
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM response: {e}")
-            return None
 
     async def _process_answer_with_llm(
         self,
@@ -663,13 +598,12 @@ class EnrichmentService:
         prompt = ANSWER_PROCESSING_PROMPT.format(
             field_path=field_path,
             answer=answer,
-            vacancy_data=json.dumps(vacancy_data, ensure_ascii=False, indent=2),
         )
-
+        
         response = await self._call_llm(prompt)
         if not response:
             return answer
-
+        
         try:
             data = json.loads(response)
             return data.get("value", answer)
@@ -677,13 +611,13 @@ class EnrichmentService:
             return answer
 
     async def _call_llm(self, prompt: str) -> str | None:
-        """Вызывает OpenRouter API."""
+        """Вызывает OpenRouter API с оптимизированными параметрами."""
         if not self.api_key:
             logger.error("OPENROUTER_API_KEY not configured")
             return None
-
+        
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=25.0) as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
@@ -695,19 +629,23 @@ class EnrichmentService:
                     json={
                         "model": self.model,
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.3,
-                        "max_tokens": 1000,
+                        "temperature": 0.2,  # Снижена для стабильности
+                        "max_tokens": 1500,
+                        "response_format": {"type": "json_object"},  # JSON mode
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
-
+                
                 if not data.get("choices"):
                     return None
-
+                
                 content = data["choices"][0].get("message", {}).get("content")
                 return self._clean_json_response(content) if content else None
-
+                
+        except httpx.TimeoutException:
+            logger.warning("LLM call timeout - skipping")
+            return None
         except Exception as e:
             logger.error(f"LLM call failed: {e}")
             return None
@@ -729,40 +667,37 @@ class EnrichmentService:
         field_path: str,
         value: Any,
     ) -> dict[str, Any]:
-        """Обновляет данные вакансии по пути к полю. Поддерживает Executive Search поля."""
+        """Обновляет данные вакансии по пути к полю."""
         import copy
-
+        
         updated = copy.deepcopy(vacancy_data)
         parts = field_path.split(".")
-
+        
         # Навигация до родительского объекта
         current = updated
         for part in parts[:-1]:
             if part not in current or current[part] is None:
                 current[part] = {}
             current = current[part]
-
-        # Устанавливаем значение
+        
         final_key = parts[-1]
-
+        
         # Специальная обработка для некоторых полей
         if field_path == "core.careerLevel.code" and isinstance(value, str):
             current[final_key] = value
-
+            
         elif field_path.endswith(".sphere") or field_path.endswith(".subSphere"):
             if isinstance(value, str):
                 current[final_key] = {"name": value}
             else:
                 current[final_key] = value
-
-        # Executive Search: triggerEvent
+                
         elif field_path == "hiringContext.triggerEvent":
             if isinstance(value, str):
                 current[final_key] = {"type": value, "description": ""}
             else:
                 current[final_key] = value
-
-        # Executive Search: industryExpertise
+                
         elif field_path == "differentiators.industryExpertise":
             if isinstance(value, list):
                 current[final_key] = {"industries": value, "whyMatters": ""}
@@ -770,15 +705,13 @@ class EnrichmentService:
                 current[final_key] = {"industries": [value], "whyMatters": ""}
             else:
                 current[final_key] = value
-
-        # Executive Search: scaleExperience
+                
         elif field_path == "differentiators.scaleExperience":
             if isinstance(value, str):
                 current[final_key] = {"teamSize": {"description": value}}
             else:
                 current[final_key] = value
-
-        # Executive Search: experienceMinimums
+                
         elif field_path == "dealbreakers.experienceMinimums":
             if isinstance(value, int):
                 current[final_key] = {"totalYears": value}
@@ -786,8 +719,7 @@ class EnrichmentService:
                 current[final_key] = {"totalYears": int(value)}
             else:
                 current[final_key] = value
-
-        # Executive Search: массивы объектов (milestones, KPIs, achievements, requirements, tasks)
+                
         elif field_path in [
             "successCriteria.onboardingMilestones",
             "successCriteria.shortTermKPIs",
@@ -798,7 +730,6 @@ class EnrichmentService:
             if isinstance(value, list):
                 current[final_key] = value
             elif isinstance(value, str):
-                # Если пришла строка, пробуем преобразовать в массив с одним элементом
                 if field_path == "successCriteria.onboardingMilestones":
                     current[final_key] = [{"milestone": value, "timeframe": "90_days", "measureOfSuccess": ""}]
                 elif field_path == "successCriteria.shortTermKPIs":
@@ -811,8 +742,7 @@ class EnrichmentService:
                     current[final_key] = [{"task": value, "deadline": "90 дней", "successIndicator": ""}]
             else:
                 current[final_key] = value
-
-        # Массивы строк
+                
         elif field_path in [
             "responsibilities.zones",
             "dealbreakers.redFlags",
@@ -822,15 +752,13 @@ class EnrichmentService:
             "successCriteria.longTermGoals",
         ]:
             if isinstance(value, str):
-                # Разбиваем по запятой или новой строке
                 items = [v.strip() for v in value.replace("\n", ",").split(",") if v.strip()]
                 current[final_key] = items if items else [value]
             else:
                 current[final_key] = value
-
         else:
             current[final_key] = value
-
+        
         return updated
 
 
