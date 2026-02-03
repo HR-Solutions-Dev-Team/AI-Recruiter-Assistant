@@ -61,7 +61,8 @@ export default function ChatStep({
   };
 
   // Загрузить начальные вопросы (с показом категорий при первом вызове)
-  const loadInitialQuestions = useCallback(async (categories?: string[]) => {
+  // skipCategorySelector = true когда категории уже выбраны
+  const loadInitialQuestions = useCallback(async (categories?: string[], skipCategorySelector: boolean = false) => {
     setIsLoadingQuestion(true);
     setError(null);
 
@@ -70,13 +71,12 @@ export default function ChatStep({
       setCompletionPercent(response.completion_percent);
 
       // Сохраняем доступные категории при первом вызове
-      if (response.available_categories && response.available_categories.length > 0) {
+      // НЕ показываем селектор если skipCategorySelector=true (категории уже выбраны)
+      if (response.available_categories && response.available_categories.length > 0 && !skipCategorySelector) {
         setAvailableCategories(response.available_categories);
-        if (!categoriesChosen) {
-          setShowCategorySelector(true);
-          setIsLoadingQuestion(false);
-          return;
-        }
+        setShowCategorySelector(true);
+        setIsLoadingQuestion(false);
+        return;
       }
 
       if (response.is_complete || response.questions.length === 0) {
@@ -97,7 +97,7 @@ export default function ChatStep({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [sessionId, setCompletionPercent, categoriesChosen]);
+  }, [sessionId, setCompletionPercent]);
 
   // Отправить накопленные ответы и получить новые вопросы
   const flushAnswersAndLoadMore = useCallback(async (answers: BatchAnswerItem[]) => {
@@ -176,8 +176,8 @@ export default function ChatStep({
       addMessage('user', 'Все категории (стандартный порядок)');
     }
     
-    // Загружаем вопросы с выбранными категориями
-    loadInitialQuestions(selectedCategories.length > 0 ? selectedCategories : undefined);
+    // Загружаем вопросы с выбранными категориями, skipCategorySelector=true
+    loadInitialQuestions(selectedCategories.length > 0 ? selectedCategories : undefined, true);
   };
 
   const handleOptionSelect = async (option: string) => {

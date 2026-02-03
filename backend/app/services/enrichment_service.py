@@ -196,6 +196,7 @@ FIELD_PRIORITIES: list[dict[str, Any]] = [
         "priority": 3,
         "description": "Уровень позиции в карьерной иерархии",
         "check": lambda d: bool(_safe_get(d, "core", "careerLevel", "code")),
+        "question_hint": "basic_info",
     },
     {
         "path": "dealbreakers.nonNegotiables",
@@ -209,18 +210,21 @@ FIELD_PRIORITIES: list[dict[str, Any]] = [
         "priority": 3,
         "description": "Индикаторы масштаба опыта (команда, бюджет, проекты)",
         "check": lambda d: bool(_safe_get(d, "requirements", "experience", "scaleIndicators")),
+        "question_hint": "executive_scale",
     },
     {
         "path": "responsibilities.zones",
         "priority": 3,
         "description": "Зоны ответственности (минимум 3 для exec search)",
         "check": lambda d: len(_safe_get(d, "responsibilities", "zones") or []) >= 3,
+        "question_hint": "executive_tasks",
     },
     {
         "path": "requirements.skills",
         "priority": 3,  # ПОНИЖЕН с 1 до 3 для executive search
         "description": "Ключевые навыки (для exec search вторичны — следуют из опыта)",
         "check": lambda d: len(_safe_get(d, "requirements", "skills") or []) >= 3,
+        "question_hint": "basic_info",
     },
     {
         "path": "differentiators.companyBackground",
@@ -245,48 +249,56 @@ FIELD_PRIORITIES: list[dict[str, Any]] = [
         "priority": 4,
         "description": "Отрасль вакансии",
         "check": lambda d: bool(_safe_get(d, "core", "industry", "name")),
+        "question_hint": "basic_info",
     },
     {
         "path": "workConditions.salary",
         "priority": 4,
         "description": "Зарплатная вилка (для exec search часто обсуждается индивидуально)",
         "check": lambda d: bool(_safe_get(d, "workConditions", "salary")),
+        "question_hint": "basic_info",
     },
     {
         "path": "workConditions.location",
         "priority": 4,
         "description": "Локация и формат работы",
         "check": lambda d: bool(_safe_get(d, "workConditions", "location")),
+        "question_hint": "basic_info",
     },
     {
         "path": "company.activitySphere.sphere",
         "priority": 4,
         "description": "Основная сфера деятельности компании",
         "check": lambda d: bool(_safe_get(d, "company", "activitySphere", "sphere")),
+        "question_hint": "basic_info",
     },
     {
         "path": "requirements.experience",
         "priority": 4,
         "description": "Общие требования к опыту работы",
         "check": lambda d: bool(_safe_get(d, "requirements", "experience", "yearsMin")),
+        "question_hint": "basic_info",
     },
     {
         "path": "orgStructure.reportsTo",
         "priority": 4,
         "description": "Кому подчиняется позиция",
         "check": lambda d: bool(_safe_get(d, "orgStructure", "reportsTo")),
+        "question_hint": "basic_info",
     },
     {
         "path": "core.synonyms",
         "priority": 4,
         "description": "Альтернативные названия позиции",
         "check": lambda d: bool(_safe_get(d, "core", "synonyms")),
+        "question_hint": "basic_info",
     },
     {
         "path": "requirements.languages",
         "priority": 4,
         "description": "Требования к языкам",
         "check": lambda d: bool(_safe_get(d, "requirements", "languages")),
+        "question_hint": "basic_info",
     },
 ]
 
@@ -301,18 +313,25 @@ FIELD_PRIORITIES: list[dict[str, Any]] = [
 QUESTION_GENERATION_PROMPT = """HR-эксперт по поиску редких специалистов.
 
 Вакансия: {job_title}
-Поле: {field_path} — {field_description}
+Заполняемое поле: {field_path}
+Описание поля: {field_description}
 
-Сгенерируй 1 вопрос и 3 варианта ответа.
+Задай ПРЯМОЙ вопрос для заполнения ЭТОГО КОНКРЕТНОГО поля. Вопрос должен напрямую относиться к полю.
+
+ПРИМЕРЫ ПРАВИЛЬНЫХ ВОПРОСОВ ПО ПОЛЯМ:
+- core.careerLevel.code → "Какой уровень позиции: Junior, Middle, Senior, Lead или Director?"
+- workConditions.salary → "Какая зарплатная вилка для этой позиции?"
+- workConditions.location → "Где будет работать сотрудник и в каком формате?"
+- requirements.skills → "Какие ключевые навыки обязательны для этой роли?"
+- orgStructure.reportsTo → "Кому будет подчиняться этот сотрудник?"
+- hiringContext.businessProblem → "Какую бизнес-проблему должен решить этот человек?"
+- responsibilities.zones → "Какие основные зоны ответственности у этой роли?"
 
 СТРОГИЕ ПРАВИЛА:
-- 10-15 слов максимум
-- БЕЗ цифр, процентов, конкретных значений
-- Только направление/вектор действия
-- Плохо: "увеличить конверсию на 10%"
-- Хорошо: "увеличить конверсию через оптимизацию UX"
-- Плохо: "команда 15 человек"
-- Хорошо: "опыт управления растущей командой"
+- Вопрос ПРЯМО относится к полю {field_path}
+- Варианты ответов — конкретные значения для этого поля
+- 10-15 слов максимум в варианте
+- БЕЗ абстрактных вопросов про "развитие" или "видение"
 - На русском
 
 JSON: {{"question": "...", "options": [{{"value": "..."}}]}}"""
@@ -381,6 +400,67 @@ class EnrichmentService:
         self.model = settings.openrouter_model
         self.base_url = settings.openrouter_base_url
 
+    def get_available_categories(self) -> dict[str, dict[str, Any]]:
+        """
+        Возвращает доступные категории вопросов для UI выбора приоритетов.
+        
+        Returns:
+            Словарь категорий с name, description и списком fields
+        """
+        categories = {
+            "executive_context": {
+                "name": "Бизнес-контекст",
+                "description": "Зачем нужен этот человек и какую проблему он решит",
+                "fields": [],
+            },
+            "executive_kpi": {
+                "name": "KPI и результаты",
+                "description": "Milestones первых 90 дней и метрики успеха",
+                "fields": [],
+            },
+            "executive_differentiator": {
+                "name": "Профиль кандидата",
+                "description": "Что отличает идеального кандидата от просто подходящего",
+                "fields": [],
+            },
+            "executive_dealbreaker": {
+                "name": "Критические требования",
+                "description": "Абсолютные требования и отсечки без исключений",
+                "fields": [],
+            },
+            "executive_tasks": {
+                "name": "Задачи и обязанности",
+                "description": "Критические задачи и зоны ответственности",
+                "fields": [],
+            },
+            "executive_scale": {
+                "name": "Масштаб опыта",
+                "description": "Размер команд, бюджеты, объёмы с которыми работал",
+                "fields": [],
+            },
+            "basic_info": {
+                "name": "Базовая информация",
+                "description": "Зарплата, локация, отрасль, опыт работы",
+                "fields": [],
+            },
+            "standard": {
+                "name": "Прочие поля",
+                "description": "Дополнительная информация о вакансии",
+                "fields": [],
+            },
+        }
+        
+        # Группируем поля по категориям
+        for field_info in FIELD_PRIORITIES:
+            hint = field_info.get("question_hint", "standard")
+            if hint in categories:
+                categories[hint]["fields"].append(field_info["path"])
+            else:
+                categories["standard"]["fields"].append(field_info["path"])
+        
+        # Удаляем пустые категории
+        return {k: v for k, v in categories.items() if v["fields"]}
+
     async def get_next_question(
         self,
         vacancy_data: dict[str, Any],
@@ -440,6 +520,8 @@ class EnrichmentService:
         self,
         vacancy_data: dict[str, Any],
         asked_fields: list[str] | None = None,
+        qa_history: list[dict[str, str]] | None = None,
+        priority_categories: list[str] | None = None,
         max_questions: int = 2,
     ) -> list[EnrichmentQuestion]:
         """
@@ -451,12 +533,16 @@ class EnrichmentService:
         Args:
             vacancy_data: Текущие данные вакансии
             asked_fields: Поля, по которым уже задавали вопросы
+            qa_history: История вопросов-ответов для контекста
+            priority_categories: Приоритетные категории вопросов
             max_questions: Максимальное количество вопросов (до 2)
 
         Returns:
             Список независимых вопросов (может быть пустым)
         """
         asked_fields = asked_fields or []
+        qa_history = qa_history or []
+        priority_categories = priority_categories or []
         questions: list[EnrichmentQuestion] = []
         selected_fields: list[str] = []
 
@@ -484,6 +570,19 @@ class EnrichmentService:
                     continue
 
             candidates.append(field_info)
+
+        # Сортируем кандидатов по приоритетным категориям
+        # Поля из выбранных категорий идут первыми
+        if priority_categories:
+            def get_category_priority(field_info: dict[str, Any]) -> int:
+                hint = field_info.get("question_hint", "standard")
+                if hint in priority_categories:
+                    # Возвращаем индекс в списке приоритетов (меньше = выше приоритет)
+                    return priority_categories.index(hint)
+                # Поля не из приоритетных категорий идут в конец
+                return len(priority_categories) + field_info.get("priority", 99)
+            
+            candidates.sort(key=get_category_priority)
 
         # Выбираем независимые поля
         for candidate in candidates:
